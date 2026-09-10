@@ -58,7 +58,8 @@ local C = {
 local popupGui            = Instance.new("ScreenGui")
 popupGui.Name             = http:GenerateGUID(false)
 popupGui.ResetOnSpawn     = false
-popupGui.ZIndexBehavior   = Enum.ZIndexBehavior.Sibling
+popupGui.ZIndexBehavior   = Enum.ZIndexBehavior.Global
+popupGui.DisplayOrder     = 1000
 popupGui.Parent           = coreGui
 
 local popup = {}
@@ -98,7 +99,8 @@ end
 local rootGui               = Instance.new("ScreenGui")
 rootGui.Name                = http:GenerateGUID(false)
 rootGui.ResetOnSpawn        = false
-rootGui.ZIndexBehavior      = Enum.ZIndexBehavior.Sibling
+rootGui.ZIndexBehavior      = Enum.ZIndexBehavior.Global
+rootGui.DisplayOrder        = 999
 rootGui.IgnoreGuiInset      = true
 rootGui.Parent              = coreGui
 
