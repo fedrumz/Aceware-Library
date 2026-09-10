@@ -433,13 +433,14 @@ end
 --      without an overlapping invisible TextButton blocking clicks.
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
-    -- FIX: Use a Frame (not TextButton) so clicks reach the TextBox inside
-    local row                          = Instance.new("Frame")
+    local row                          = Instance.new("TextButton")
     row.Name                           = title .. "Textbox"
     row.BackgroundColor3               = C.white
     row.BackgroundTransparency         = 1
     row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
+    row.Size                           = ud2(1, 0, 0, 36)
+    row.Text                           = ""
+    row.AutoButtonColor                = false
     row.Parent                         = self.bodyFrame
     self:Resize(self.bodyFrame)
 
@@ -468,8 +469,7 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.PlaceholderText                = "..."
     box.TextXAlignment                 = Enum.TextXAlignment.Left
     box.ClearTextOnFocus               = false
-    box.Active                         = true
-    box.ZIndex                         = 2    -- FIX: ensure box renders above row frame
+    box.Selectable                     = true
     box.Parent                         = row
 
     local boxPad                       = Instance.new("UIPadding")
@@ -480,6 +480,11 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     if config[title] then popup:new("Set " .. title .. " to " .. config[title]) end
     box.Text = preset
     if not noCallbackOnStart then callback(preset) end
+
+    -- Clicking anywhere on the row manually captures focus for the TextBox
+    row.MouseButton1Click:Connect(function()
+        box:CaptureFocus()
+    end)
 
     box.FocusLost:Connect(function()
         config[title] = box.Text
