@@ -19,7 +19,6 @@ end
 
 local tweenSvc  = game:GetService("TweenService")
 local inputSvc  = game:GetService("UserInputService")
-local runSvc    = game:GetService("RunService")
 local coreGui   = game:GetService("CoreGui")
 local players   = game:GetService("Players")
 
@@ -180,28 +179,20 @@ tabLayout.Parent              = tabsFrame
 --             Stores cursor-to-frame-corner offset at mousedown so the grabbed
 --             pixel stays locked under the cursor with zero accumulated error.
 -- ─────────────────────────────────────────────────────────────────────────────
-local dragging  = false
-local dragOffX  = 0
-local dragOffY  = 0
-local dragConn  = nil   -- RenderStepped connection, disconnected when not dragging
+local dragging = false
+local dragOffX = 0
+local dragOffY = 0
 
 local function beginDrag(input)
     dragging = true
     dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
     dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
-
-    -- Connect RenderStepped only while dragging — fires every frame, no lag
-    dragConn = runSvc.RenderStepped:Connect(function()
-        local pos = inputSvc:GetMouseLocation()
-        mainFrame.Position = ud2(0, pos.X - dragOffX, 0, pos.Y - dragOffY)
-    end)
 end
 
 local function endDrag(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
-        if dragConn then dragConn:Disconnect(); dragConn = nil end
     end
 end
 
@@ -215,11 +206,18 @@ local function attachDrag(frame)
     frame.InputEnded:Connect(endDrag)
 end
 
--- Allow dragging from both the topbar and the tab bar
 attachDrag(topBar)
 attachDrag(tabsFrame)
 
--- Safety: also end drag on global mouse release in case cursor leaves frame fast
+-- Global mouse move: fires every pixel of movement, offset math means zero drift
+inputSvc.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    mainFrame.Position = ud2(0, input.Position.X - dragOffX, 0, input.Position.Y - dragOffY)
+end)
+
+-- Safety release in case mouse button is released outside a frame
 inputSvc.InputEnded:Connect(endDrag)
 
 -- ── exit / minimise ──────────────────────────────────────────────────────────
@@ -286,6 +284,7 @@ function AxewareLib:new(title)
     body.Position                  = ud2(0, 0, 0, 54)
     body.Size                      = ud2(1, 0, 1, -54)
     body.CanvasSize                = ud2(0, 0, 0, 0)
+    body.AutomaticCanvasSize       = Enum.AutomaticSize.Y
     body.ScrollBarThickness        = 4
     body.ScrollBarImageColor3      = C.scrollBar
     body.ScrollingDirection        = Enum.ScrollingDirection.Y
