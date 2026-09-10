@@ -175,18 +175,21 @@ tabLayout.SortOrder           = Enum.SortOrder.LayoutOrder
 tabLayout.Parent              = tabsFrame
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- DRAGGING  (fixed: capture AbsolutePosition at the moment drag starts)
+-- DRAGGING  — stores the cursor-to-frame-corner offset at mousedown,
+--             then every moved event just sets position = cursor - offset.
+--             No delta math, no accumulated error, no lag.
 -- ─────────────────────────────────────────────────────────────────────────────
-local dragging      = false
-local dragStart     = Vector2.new()   -- cursor world position at mousedown
-local frameStart    = Vector2.new()   -- mainFrame.AbsolutePosition at mousedown
+local dragging  = false
+local dragOffX  = 0   -- cursor.X - frame.AbsolutePosition.X at mousedown
+local dragOffY  = 0   -- cursor.Y - frame.AbsolutePosition.Y at mousedown
 
 topBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
-        dragging   = true
-        dragStart  = Vector2.new(input.Position.X, input.Position.Y)
-        frameStart = Vector2.new(mainFrame.AbsolutePosition.X, mainFrame.AbsolutePosition.Y)
+        dragging = true
+        -- AbsolutePosition already accounts for GuiInset when IgnoreGuiInset=true
+        dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
+        dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
     end
 end)
 
@@ -197,13 +200,13 @@ topBar.InputEnded:Connect(function(input)
     end
 end)
 
+-- Use UserInputService.InputChanged — fires every mousemove/touch, no RunService needed
 inputSvc.InputChanged:Connect(function(input)
     if not dragging then return end
     if input.UserInputType ~= Enum.UserInputType.MouseMovement
     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-    local delta = Vector2.new(input.Position.X - dragStart.X, input.Position.Y - dragStart.Y)
-    mainFrame.Position = ud2(0, frameStart.X + delta.X, 0, frameStart.Y + delta.Y)
+    -- Position so the pixel the user grabbed stays under the cursor
+    mainFrame.Position = ud2(0, input.Position.X - dragOffX, 0, input.Position.Y - dragOffY)
 end)
 
 -- ── exit / minimise ──────────────────────────────────────────────────────────
@@ -224,10 +227,11 @@ miniBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- P / RightShift to toggle visibility
-inputSvc.InputBegan:Connect(function(input, onGui)
-    if not onGui and (input.KeyCode == Enum.KeyCode.P
-    or input.KeyCode == Enum.KeyCode.RightShift) then
+-- P / RightShift to toggle visibility (gameProcessed = true means a TextBox ate it)
+inputSvc.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.P
+    or input.KeyCode == Enum.KeyCode.RightShift then
         rootGui.Enabled = not rootGui.Enabled
     end
 end)
@@ -338,9 +342,7 @@ end
 -- newBtn  (toggle or action)
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBtn(title, callback, noToggle)
-    self:Resize(self.bodyFrame)
-
-    -- Shared row factory
+    -- Shared row factory — parents first, then Resize is called after so count is right
     local function makeRow()
         local btn                      = Instance.new("TextButton")
         btn.BackgroundColor3           = C.white
@@ -351,6 +353,7 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
         btn.TextSize                   = 1
         btn.Text                       = ""
         btn.Parent                     = self.bodyFrame
+        self:Resize(self.bodyFrame)
         return btn
     end
 
@@ -423,134 +426,20 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- newSlider  (fixed formula + touch)
--- ─────────────────────────────────────────────────────────────────────────────
-function AxewareLib.Content:newSlider(title, callback, minVal, maxVal, startVal)
-    self:Resize(self.bodyFrame)
-
-    local sliding = false
-
-    local row                          = Instance.new("Frame")
-    row.Name                           = title .. "Slider"
-    row.BackgroundTransparency         = 1
-    row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 30)
-    row.Parent                         = self.bodyFrame
-
-    -- Title label
-    local titleLbl                     = Instance.new("TextLabel")
-    titleLbl.BackgroundTransparency    = 1
-    titleLbl.Position                  = ud2(0, 10, 0, 0)
-    titleLbl.Size                      = ud2(0, 110, 1, 0)
-    titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
-    titleLbl.TextColor3                = C.textMain
-    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
-    titleLbl.Text                      = title
-    titleLbl.Parent                    = row
-
-    -- Track  (sits right of title, ends before scroll-bar gap)
-    local track                        = Instance.new("Frame")
-    track.Name                         = "sliderIndicatorFrame"
-    track.BackgroundColor3             = C.track
-    track.BorderSizePixel              = 0
-    track.Position                     = ud2(0, 124, 0.5, -5)
-    track.Size                         = ud2(1, -170, 0, 10)
-    track.Parent                       = row
-
-    -- Fill
-    local fill                         = Instance.new("Frame")
-    fill.Name                          = "slidingFrame"
-    fill.BackgroundColor3              = C.fill
-    fill.BorderSizePixel               = 0
-    fill.Size                          = ud2(0, 0, 1, 0)
-    fill.Parent                        = track
-
-    -- Value label  (italic, right of track)
-    local valLbl                       = Instance.new("TextLabel")
-    valLbl.Name                        = "valueLabel"
-    valLbl.BackgroundTransparency      = 1
-    valLbl.Position                    = ud2(1, 6, 0, 0)
-    valLbl.Size                        = ud2(0, 38, 1, 0)
-    valLbl.Font                        = Enum.Font.GothamItalic
-    valLbl.TextSize                    = 12
-    valLbl.TextColor3                  = C.textDim
-    valLbl.TextXAlignment              = Enum.TextXAlignment.Left
-    valLbl.Text                        = "0"
-    valLbl.Parent                      = track
-
-    -- Correct mapping: scale → value in [minVal, maxVal]
-    local function scaleToVal(scale)
-        return floor(minVal + scale * (maxVal - minVal))
-    end
-
-    local function applyStart(val)
-        local scale = clamp((val - minVal) / (maxVal - minVal), 0, 1)
-        fill.Size   = ud2(scale, 0, 1, 0)
-        valLbl.Text = tostring(floor(val))
-        callback(floor(val))
-    end
-
-    local sp = config[title] and tonumber(config[title]) or startVal
-    if sp then
-        applyStart(sp)
-        if config[title] then
-            popup:new("Set " .. title .. " to " .. tostring(floor(sp)))
-        end
-    end
-
-    local function slide(input)
-        local rel   = (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X
-        local scale = clamp(rel, 0, 1)
-        local val   = scaleToVal(scale)
-        fill:TweenSize(ud2(scale, 0, 1, 0), "Out", "Quad", 0.07, true)
-        valLbl.Text = tostring(val)
-        callback(val)
-    end
-
-    track.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            sliding = true
-            slide(input)
-        end
-    end)
-
-    track.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            sliding = false
-            config[title] = valLbl.Text
-            saveConfig()
-            popup:new("Set " .. title .. " to " .. valLbl.Text)
-        end
-    end)
-
-    inputSvc.InputChanged:Connect(function(input)
-        if not sliding then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
-            slide(input)
-        end
-    end)
-end
-
--- ─────────────────────────────────────────────────────────────────────────────
--- newTextbox
+-- newTextbox  — label left, dark input box right (matches Owl Hub inputBox style)
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
-    self:Resize(self.bodyFrame)
-
     local row                          = Instance.new("Frame")
     row.Name                           = title .. "Textbox"
     row.BackgroundTransparency         = 1
     row.BorderSizePixel                = 0
     row.Size                           = ud2(1, 0, 0, 30)
-    row.Parent                         = self.bodyFrame
+    row.Parent                         = self.bodyFrame  -- parent FIRST
+    self:Resize(self.bodyFrame)         -- THEN resize so this row is counted
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
-    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Position                  = ud2(0, 8, 0, 0)
     titleLbl.Size                      = ud2(0, 110, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
     titleLbl.TextSize                  = 13
@@ -559,14 +448,14 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     titleLbl.Text                      = title
     titleLbl.Parent                    = row
 
-    -- Input box: matches Owl Hub's italic grey inputBox style
+    -- Dark input box sitting right of the label, same style as Owl Hub's .inputBox
     local box                          = Instance.new("TextBox")
     box.Name                           = "inputBox"
-    box.BackgroundColor3               = C.track
-    box.BackgroundTransparency         = 0.4
+    box.BackgroundColor3               = fromRGB(45, 45, 45)
+    box.BackgroundTransparency         = 0
     box.BorderSizePixel                = 0
-    box.Position                       = ud2(0, 124, 0.5, -10)
-    box.Size                           = ud2(1, -170, 0, 20)
+    box.Position                       = ud2(0, 122, 0.5, -10)
+    box.Size                           = ud2(1, -130, 0, 20)   -- stretches to right edge minus scrollbar gap
     box.Font                           = Enum.Font.GothamItalic
     box.TextSize                       = 12
     box.TextColor3                     = C.textGrey
@@ -597,8 +486,6 @@ end
 -- newBind  (toggle on/off each press)
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBind(title, callback, presetKeyCode)
-    self:Resize(self.bodyFrame)
-
     local enabled   = false
     local listening = false
     presetKeyCode   = config[title] and Enum.KeyCode[config[title]] or presetKeyCode
@@ -611,6 +498,7 @@ function AxewareLib.Content:newBind(title, callback, presetKeyCode)
     row.BorderSizePixel                = 0
     row.Size                           = ud2(1, 0, 0, 30)
     row.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
@@ -668,8 +556,6 @@ end
 -- newCBind  (hold bind: true while key held, false on release)
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
-    self:Resize(self.bodyFrame)
-
     local shortNames = {
         RightControl = "RightCtrl"; LeftControl = "LeftCtrl";
         LeftShift    = "LShift";    RightShift  = "RShift";
@@ -698,6 +584,7 @@ function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
     row.BorderSizePixel                = 0
     row.Size                           = ud2(1, 0, 0, 30)
     row.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
@@ -765,8 +652,6 @@ end
 -- newColorPicker
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newColorPicker(title, callback, presetColor)
-    self:Resize(self.bodyFrame)
-
     local oldSize
     local rainbow        = false
     local hueSatDrag     = false
@@ -780,6 +665,7 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     btn.Size                           = ud2(1, 0, 0, 30)
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
     local colorDot                     = Instance.new("Frame")
     colorDot.BorderSizePixel           = 0
@@ -978,8 +864,6 @@ end
 -- newDropdown
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart)
-    self:Resize(self.bodyFrame)
-
     local oldSize
 
     local btn                          = Instance.new("TextButton")
@@ -989,6 +873,7 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     btn.Size                           = ud2(1, 0, 0, 30)
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
@@ -1130,11 +1015,6 @@ main:newBtn("Kill All", function()
     print("Kill All!")
 end, true)
 
--- Slider  (title, callback, min, max, default)
-main:newSlider("FOV", function(v)
-    print("FOV:", v)
-end, 10, 200, 90)
-
 -- Textbox  (title, callback, placeholder, noCallbackOnStart)
 main:newTextbox("Target Name", function(text)
     print("Target:", text)
@@ -1165,9 +1045,5 @@ end, Color3.fromRGB(255, 0, 0))
 visuals:newBtn("Chams", function(on)
     print("Chams:", on)
 end)
-
-visuals:newSlider("ESP Range", function(v)
-    print("Range:", v)
-end, 50, 1000, 500)
 
 ]]
