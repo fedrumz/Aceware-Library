@@ -128,10 +128,23 @@ function lib:Window(text)
 	local minimize = Instance.new("TextButton") -- replaced ImageButton: no asset needed
 
 	VenLib.Name = "VenLib"
-	VenLib.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+	-- gethui() is undetectable and above all game UIs; fall back to CoreGui, then PlayerGui
+	local function getParent()
+		if gethui then
+			return gethui()
+		elseif syn and syn.protect_gui then
+			syn.protect_gui(VenLib)
+			return game.CoreGui
+		elseif pcall(function() game.CoreGui:FindFirstChild("RobloxGui") end) then
+			return game.CoreGui
+		else
+			return game.Players.LocalPlayer:WaitForChild("PlayerGui")
+		end
+	end
+	VenLib.Parent = getParent()
 	VenLib.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	VenLib.ResetOnSpawn = false   -- persists on respawn so game UIs can't wipe it
-	VenLib.DisplayOrder = 999     -- renders IN FRONT of all game ScreenGuis
+	VenLib.ResetOnSpawn = false
+	VenLib.DisplayOrder = 999
 
 	mainframe.Name = "mainframe"
 	mainframe.Parent = VenLib
