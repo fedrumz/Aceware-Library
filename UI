@@ -131,7 +131,7 @@ function lib:Window(text)
 	VenLib.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 	VenLib.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	VenLib.ResetOnSpawn = false   -- persists on respawn so game UIs can't wipe it
-	VenLib.DisplayOrder = -999    -- renders BEHIND all game ScreenGuis
+	VenLib.DisplayOrder = 999     -- renders IN FRONT of all game ScreenGuis
 
 	mainframe.Name = "mainframe"
 	mainframe.Parent = VenLib
