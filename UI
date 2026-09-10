@@ -19,6 +19,7 @@ end
 
 local tweenSvc  = game:GetService("TweenService")
 local inputSvc  = game:GetService("UserInputService")
+local runSvc    = game:GetService("RunService")
 local coreGui   = game:GetService("CoreGui")
 local players   = game:GetService("Players")
 
@@ -33,16 +34,16 @@ local ud2off   = UDim2.fromOffset
 -- COLOURS  (sampled from Owl Hub screenshot)
 -- ─────────────────────────────────────────────────────────────────────────────
 local C = {
-    topBar     = fromRGB(25,  25,  25),   -- very dark, topbar + active tab
-    body       = fromRGB(35,  35,  35),   -- main body bg
-    tab        = fromRGB(45,  45,  45),   -- inactive tab
-    tabActive  = fromRGB(25,  25,  25),   -- active tab = same as topbar
-    row        = fromRGB(35,  35,  35),   -- row bg (transparent hover)
-    track      = fromRGB(55,  55,  55),   -- slider track
-    fill       = fromRGB(110, 110, 110),  -- slider fill
-    bind       = fromRGB(30,  30,  30),   -- bind/key button bg
-    dropdown   = fromRGB(40,  40,  40),   -- dropdown panel
-    dropOpt    = fromRGB(48,  48,  48),   -- dropdown option
+    topBar     = fromRGB(25,  25,  25),
+    body       = fromRGB(35,  35,  35),
+    tab        = fromRGB(45,  45,  45),
+    tabActive  = fromRGB(25,  25,  25),
+    row        = fromRGB(35,  35,  35),
+    track      = fromRGB(55,  55,  55),
+    fill       = fromRGB(110, 110, 110),
+    bind       = fromRGB(30,  30,  30),
+    dropdown   = fromRGB(40,  40,  40),
+    dropOpt    = fromRGB(48,  48,  48),
     white      = fromRGB(255, 255, 255),
     textMain   = fromRGB(240, 240, 240),
     textGrey   = fromRGB(170, 170, 170),
@@ -53,7 +54,7 @@ local C = {
 }
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- POPUP  (bottom-right toast, same API as original)
+-- POPUP  (bottom-right toast)
 -- ─────────────────────────────────────────────────────────────────────────────
 local popupGui            = Instance.new("ScreenGui")
 popupGui.Name             = http:GenerateGUID(false)
@@ -63,20 +64,21 @@ popupGui.Parent           = coreGui
 
 local popup = {}
 function popup:new(msg)
+    -- FIX: slightly taller/wider popup, bigger font
     local f                      = Instance.new("Frame")
     f.BackgroundColor3           = fromRGB(30, 30, 30)
     f.BorderSizePixel            = 0
-    f.Size                       = ud2off(200, 22)
-    f.Position                   = ud2(1, -210, 1, -34)
+    f.Size                       = ud2off(220, 26)
+    f.Position                   = ud2(1, -232, 1, -38)
     f.BackgroundTransparency     = 0
     f.Parent                     = popupGui
 
     local lbl                    = Instance.new("TextLabel")
     lbl.BackgroundTransparency   = 1
     lbl.Size                     = ud2(1, -10, 1, 0)
-    lbl.Position                 = ud2(0, 6, 0, 0)
+    lbl.Position                 = ud2(0, 8, 0, 0)
     lbl.Font                     = Enum.Font.GothamMedium
-    lbl.TextSize                 = 11
+    lbl.TextSize                 = 13
     lbl.TextColor3               = C.white
     lbl.TextXAlignment           = Enum.TextXAlignment.Left
     lbl.TextTruncate             = Enum.TextTruncate.AtEnd
@@ -119,7 +121,6 @@ topBar.BorderSizePixel        = 0
 topBar.Size                   = ud2(1, 0, 0, 27)
 topBar.Parent                 = mainFrame
 
--- Title label  ("Axeware" in bold, matches Owl Hub's bold header text)
 local titleLbl                = Instance.new("TextLabel")
 titleLbl.BackgroundTransparency = 1
 titleLbl.Size                 = ud2(0, 140, 1, 0)
@@ -131,7 +132,6 @@ titleLbl.TextXAlignment       = Enum.TextXAlignment.Left
 titleLbl.Text                 = "Axeware"
 titleLbl.Parent               = topBar
 
--- Helper: make a topbar icon button (×, −)
 local function makeTopBtn(symbol, xOffset)
     local b                      = Instance.new("TextButton")
     b.BackgroundTransparency     = 1
@@ -175,41 +175,52 @@ tabLayout.SortOrder           = Enum.SortOrder.LayoutOrder
 tabLayout.Parent              = tabsFrame
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- DRAGGING  — listen on the whole mainFrame but only start drag when the
---             click lands in the topbar zone (Y < 27).  This means every
---             pixel of the topbar — including the area behind the × and − —
---             drags correctly, and body clicks are ignored.
+-- DRAGGING  — FIX: use RenderStepped for buttery-smooth movement.
+--             Drag is initiated from topBar OR tabsFrame (both header areas).
+--             Stores cursor-to-frame-corner offset at mousedown so the grabbed
+--             pixel stays locked under the cursor with zero accumulated error.
 -- ─────────────────────────────────────────────────────────────────────────────
-local dragging = false
-local dragOffX = 0
-local dragOffY = 0
+local dragging  = false
+local dragOffX  = 0
+local dragOffY  = 0
+local dragConn  = nil   -- RenderStepped connection, disconnected when not dragging
 
-mainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-        -- Only start drag when cursor is inside the topbar strip
-        local relY = input.Position.Y - mainFrame.AbsolutePosition.Y
-        if relY <= 27 then
-            dragging = true
-            dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
-            dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
-        end
-    end
-end)
+local function beginDrag(input)
+    dragging = true
+    dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
+    dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
 
-mainFrame.InputEnded:Connect(function(input)
+    -- Connect RenderStepped only while dragging — fires every frame, no lag
+    dragConn = runSvc.RenderStepped:Connect(function()
+        local pos = inputSvc:GetMouseLocation()
+        mainFrame.Position = ud2(0, pos.X - dragOffX, 0, pos.Y - dragOffY)
+    end)
+end
+
+local function endDrag(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
+        if dragConn then dragConn:Disconnect(); dragConn = nil end
     end
-end)
+end
 
-inputSvc.InputChanged:Connect(function(input)
-    if not dragging then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseMovement
-    and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    mainFrame.Position = ud2(0, input.Position.X - dragOffX, 0, input.Position.Y - dragOffY)
-end)
+local function attachDrag(frame)
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            beginDrag(input)
+        end
+    end)
+    frame.InputEnded:Connect(endDrag)
+end
+
+-- Allow dragging from both the topbar and the tab bar
+attachDrag(topBar)
+attachDrag(tabsFrame)
+
+-- Safety: also end drag on global mouse release in case cursor leaves frame fast
+inputSvc.InputEnded:Connect(endDrag)
 
 -- ── exit / minimise ──────────────────────────────────────────────────────────
 exitBtn.MouseButton1Click:Connect(function()
@@ -229,7 +240,6 @@ miniBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- P / RightShift to toggle visibility (gameProcessed = true means a TextBox ate it)
 inputSvc.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.P
@@ -243,16 +253,14 @@ end)
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib:SetCategory() end
 
--- Recalculate ScrollingFrame CanvasSize based on non-layout children
 function AxewareLib.Content:Resize(sf)
     local count = 0
     for _, v in next, sf:GetChildren() do
         if not v:IsA("UIListLayout") then count += 1 end
     end
-    sf.CanvasSize = ud2(0, 0, 0, count * 30)
+    sf.CanvasSize = ud2(0, 0, 0, count * 36)  -- FIX: match new row height (36)
 end
 
--- Hover tint: BackgroundTransparency 0.88 ↔ 1
 function AxewareLib.Content:initBtnEffect(btn)
     local tIn  = tweenSvc:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 0.88 })
     local tOut = tweenSvc:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 1    })
@@ -265,13 +273,12 @@ function AxewareLib.Content:initBtnEffect(btn)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- AxewareLib:new(title)  →  creates a tab + its body ScrollingFrame
+-- AxewareLib:new(title)
 -- ─────────────────────────────────────────────────────────────────────────────
 local firstBodyFrame
 function AxewareLib:new(title)
     local self = setmetatable({}, { __index = AxewareLib.Content })
 
-    -- Body: ScrollingFrame that fills the space below both bars (y = 54)
     local body                     = Instance.new("ScrollingFrame")
     body.Name                      = title .. "BodyFrame"
     body.BackgroundColor3          = C.body
@@ -282,7 +289,6 @@ function AxewareLib:new(title)
     body.ScrollBarThickness        = 4
     body.ScrollBarImageColor3      = C.scrollBar
     body.ScrollingDirection        = Enum.ScrollingDirection.Y
-    body.ZIndexBehavior            = Enum.ZIndexBehavior.Sibling
     body.Visible                   = false
     body.Parent                    = mainFrame
 
@@ -292,7 +298,6 @@ function AxewareLib:new(title)
 
     self.bodyFrame = body
 
-    -- Tab button
     local tab                      = Instance.new("TextButton")
     tab.Name                       = title .. "TabBtn"
     tab.BackgroundColor3           = C.tab
@@ -310,7 +315,6 @@ function AxewareLib:new(title)
     pad.PaddingRight               = UDim.new(0, 12)
     pad.Parent                     = tab
 
-    -- First tab starts active
     if not firstBodyFrame then
         firstBodyFrame       = body
         body.Visible         = true
@@ -319,7 +323,6 @@ function AxewareLib:new(title)
     end
 
     tab.MouseButton1Click:Connect(function()
-        -- Hide all body frames, reset all tabs
         for _, v in next, mainFrame:GetChildren() do
             if v.Name:find("BodyFrame") and v ~= body then
                 v.Visible = false
@@ -343,15 +346,15 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newBtn  (toggle or action)
+-- FIX: row height 30→36, dot 12→15, font 13→14
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBtn(title, callback, noToggle)
-    -- Shared row factory — parents first, then Resize is called after so count is right
     local function makeRow()
         local btn                      = Instance.new("TextButton")
         btn.BackgroundColor3           = C.white
         btn.BackgroundTransparency     = 1
         btn.BorderSizePixel            = 0
-        btn.Size                       = ud2(1, 0, 0, 30)
+        btn.Size                       = ud2(1, 0, 0, 36)   -- FIX: 30 → 36
         btn.Font                       = Enum.Font.Gotham
         btn.TextSize                   = 1
         btn.Text                       = ""
@@ -366,7 +369,7 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
         lbl.Position                   = ud2(0, xPos, 0, 0)
         lbl.Size                       = ud2(1, xSize, 1, 0)
         lbl.Font                       = Enum.Font.Gotham
-        lbl.TextSize                   = 13
+        lbl.TextSize                   = 14   -- FIX: 13 → 14
         lbl.TextColor3                 = C.textMain
         lbl.TextXAlignment             = Enum.TextXAlignment.Left
         lbl.Text                       = text
@@ -375,22 +378,20 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
     end
 
     if not noToggle then
-        -- ── Toggle button ─────────────────────────────────────────────────────
         local enabled = config[title] and true or false
         if enabled then callback(enabled); popup:new("Enabled " .. title) end
 
         local btn = makeRow()
 
-        -- Status dot  (12×12, matches Owl Hub's colored square indicator)
         local dot                      = Instance.new("Frame")
         dot.Name                       = "statusFrame"
         dot.BorderSizePixel            = 0
-        dot.Size                       = ud2off(12, 12)
-        dot.Position                   = ud2(0, 10, 0.5, -6)
+        dot.Size                       = ud2off(15, 15)      -- FIX: 12 → 15
+        dot.Position                   = ud2(0, 10, 0.5, -7) -- FIX: -6 → -7 (center 15px)
         dot.BackgroundColor3           = enabled and C.green or C.red
         dot.Parent                     = btn
 
-        makeLabel(btn, 28, -36, title)   -- xSize -36 leaves gap for scroll bar
+        makeLabel(btn, 32, -40, title)  -- FIX: xPos 28→32, xSize -36→-40
         self:initBtnEffect(btn)
 
         local colorMap = { [true] = C.green, [false] = C.red }
@@ -411,7 +412,6 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
         }
 
     else
-        -- ── Action button (no toggle, no dot) ────────────────────────────────
         local btn = makeRow()
         makeLabel(btn, 10, -18, title)
         self:initBtnEffect(btn)
@@ -429,36 +429,39 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- newTextbox  — label left, dark input box right (matches Owl Hub inputBox style)
+-- newTextbox
+-- FIX: row height 30→36. Use a Frame row so the TextBox receives input directly
+--      without an overlapping invisible TextButton blocking clicks.
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
+    -- FIX: Use a Frame (not TextButton) so clicks reach the TextBox inside
     local row                          = Instance.new("Frame")
     row.Name                           = title .. "Textbox"
+    row.BackgroundColor3               = C.white
     row.BackgroundTransparency         = 1
     row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 30)
-    row.Parent                         = self.bodyFrame  -- parent FIRST
-    self:Resize(self.bodyFrame)         -- THEN resize so this row is counted
+    row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
+    row.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
     titleLbl.Position                  = ud2(0, 8, 0, 0)
     titleLbl.Size                      = ud2(0, 110, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
+    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
     titleLbl.Parent                    = row
 
-    -- Dark input box sitting right of the label, same style as Owl Hub's .inputBox
     local box                          = Instance.new("TextBox")
     box.Name                           = "inputBox"
     box.BackgroundColor3               = fromRGB(45, 45, 45)
     box.BackgroundTransparency         = 0
     box.BorderSizePixel                = 0
-    box.Position                       = ud2(0, 122, 0.5, -10)
-    box.Size                           = ud2(1, -130, 0, 20)   -- stretches to right edge minus scrollbar gap
+    box.Position                       = ud2(0, 122, 0.5, -11)  -- FIX: -10 → -11 for 22px height
+    box.Size                           = ud2(1, -130, 0, 22)    -- FIX: height 20 → 22
     box.Font                           = Enum.Font.GothamItalic
     box.TextSize                       = 12
     box.TextColor3                     = C.textGrey
@@ -466,8 +469,7 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.PlaceholderText                = "..."
     box.TextXAlignment                 = Enum.TextXAlignment.Left
     box.ClearTextOnFocus               = false
-    box.Active                         = true
-    box.ZIndex                         = 3   -- above the transparent btn rows (ZIndex 1)
+    box.ZIndex                         = 2    -- FIX: ensure box renders above row frame
     box.Parent                         = row
 
     local boxPad                       = Instance.new("UIPadding")
@@ -489,6 +491,7 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newBind  (toggle on/off each press)
+-- FIX: row height 30→36
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBind(title, callback, presetKeyCode)
     local enabled   = false
@@ -501,7 +504,7 @@ function AxewareLib.Content:newBind(title, callback, presetKeyCode)
     row.Name                           = title .. "Bind"
     row.BackgroundTransparency         = 1
     row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 30)
+    row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     row.Parent                         = self.bodyFrame
     self:Resize(self.bodyFrame)
 
@@ -510,7 +513,7 @@ function AxewareLib.Content:newBind(title, callback, presetKeyCode)
     titleLbl.Position                  = ud2(0, 10, 0, 0)
     titleLbl.Size                      = ud2(1, -80, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
+    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
@@ -559,6 +562,7 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newCBind  (hold bind: true while key held, false on release)
+-- FIX: row height 30→36
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
     local shortNames = {
@@ -587,7 +591,7 @@ function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
     row.Name                           = title .. "CBind"
     row.BackgroundTransparency         = 1
     row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 30)
+    row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     row.Parent                         = self.bodyFrame
     self:Resize(self.bodyFrame)
 
@@ -596,7 +600,7 @@ function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
     titleLbl.Position                  = ud2(0, 10, 0, 0)
     titleLbl.Size                      = ud2(1, -80, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
+    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
@@ -655,6 +659,7 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newColorPicker
+-- FIX: row height 30→36
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     local oldSize
@@ -667,7 +672,7 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     btn.BackgroundColor3               = C.white
     btn.BackgroundTransparency         = 1
     btn.BorderSizePixel                = 0
-    btn.Size                           = ud2(1, 0, 0, 30)
+    btn.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
     self:Resize(self.bodyFrame)
@@ -683,13 +688,12 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     titleLbl.Position                  = ud2(0, 30, 0, 0)
     titleLbl.Size                      = ud2(1, -40, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
+    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
     titleLbl.Parent                    = btn
 
-    -- Picker panel
     local panel                        = Instance.new("Frame")
     panel.BackgroundColor3             = fromRGB(28, 28, 28)
     panel.BorderSizePixel              = 0
@@ -700,13 +704,12 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     panel.ZIndex                       = 5
     panel.Parent                       = btn
 
-    -- Hue-Sat gradient
     local hueSat                       = Instance.new("ImageLabel")
     hueSat.BackgroundColor3            = fromRGB(255, 0, 0)
     hueSat.BorderSizePixel             = 0
     hueSat.Position                    = ud2(0, 4, 0, 4)
     hueSat.Size                        = ud2(0, 130, 0, 90)
-    hueSat.Image                       = "rbxassetid://4155801252"  -- white-to-transparent gradient (safe asset)
+    hueSat.Image                       = "rbxassetid://4155801252"
     hueSat.ZIndex                      = 5
     hueSat.Parent                      = panel
 
@@ -718,7 +721,6 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     hueSatCursor.ZIndex                = 6
     hueSatCursor.Parent                = hueSat
 
-    -- Value (brightness) strip
     local valStrip                     = Instance.new("ImageLabel")
     valStrip.BackgroundColor3          = fromRGB(255, 0, 0)
     valStrip.BorderSizePixel           = 0
@@ -748,7 +750,6 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     rainbowBtn.ZIndex                  = 5
     rainbowBtn.Parent                  = panel
 
-    -- Initialise color
     presetColor = presetColor or fromRGB(255, 255, 255)
     if config[title] then
         if type(config[title]) == "table" and config[title]["R"] then
@@ -849,7 +850,6 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
         end
     end)
 
-    -- Rainbow loop
     spawn(function()
         while true do
             for i = 1, 230 do
@@ -867,6 +867,7 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newDropdown
+-- FIX: row height 30→36
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart)
     local oldSize
@@ -875,7 +876,7 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     btn.BackgroundColor3               = C.white
     btn.BackgroundTransparency         = 1
     btn.BorderSizePixel                = 0
-    btn.Size                           = ud2(1, 0, 0, 30)
+    btn.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
     self:Resize(self.bodyFrame)
@@ -885,7 +886,7 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     titleLbl.Position                  = ud2(0, 10, 0, 0)
     titleLbl.Size                      = ud2(1, -30, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 13
+    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
@@ -902,7 +903,6 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     arrow.Rotation                     = 180
     arrow.Parent                       = btn
 
-    -- Dropdown panel
     local panel                        = Instance.new("Frame")
     panel.BackgroundColor3             = C.dropdown
     panel.BorderSizePixel              = 0
@@ -972,7 +972,7 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     btn.MouseButton1Click:Connect(function()
         if not panel.Visible then
             oldSize = self.bodyFrame.CanvasSize
-            local optCount = #panel:GetChildren() - 1  -- subtract UIListLayout
+            local optCount = #panel:GetChildren() - 1
             self.bodyFrame.CanvasSize = oldSize + ud2(0, 0, 0, optCount * 27 + 4)
             panel.Visible = true
             arrowOpen:Play()
