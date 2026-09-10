@@ -109,7 +109,7 @@ mainFrame.BackgroundColor3    = C.body
 mainFrame.BorderSizePixel     = 0
 mainFrame.Size                = ud2off(387, 225)
 mainFrame.Position            = ud2(0.5, -193, 0.5, -112)
-mainFrame.ClipsDescendants    = true
+mainFrame.ClipsDescendants    = false
 mainFrame.Parent              = rootGui
 
 -- ── topBarFrame  full-width × 27 ─────────────────────────────────────────────
@@ -468,6 +468,7 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.PlaceholderText                = "..."
     box.TextXAlignment                 = Enum.TextXAlignment.Left
     box.ClearTextOnFocus               = false
+    box.Active                         = true
     box.ZIndex                         = 2    -- FIX: ensure box renders above row frame
     box.Parent                         = row
 
