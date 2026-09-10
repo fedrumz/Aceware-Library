@@ -175,37 +175,39 @@ tabLayout.SortOrder           = Enum.SortOrder.LayoutOrder
 tabLayout.Parent              = tabsFrame
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- DRAGGING  — stores the cursor-to-frame-corner offset at mousedown,
---             then every moved event just sets position = cursor - offset.
---             No delta math, no accumulated error, no lag.
+-- DRAGGING  — listen on the whole mainFrame but only start drag when the
+--             click lands in the topbar zone (Y < 27).  This means every
+--             pixel of the topbar — including the area behind the × and − —
+--             drags correctly, and body clicks are ignored.
 -- ─────────────────────────────────────────────────────────────────────────────
-local dragging  = false
-local dragOffX  = 0   -- cursor.X - frame.AbsolutePosition.X at mousedown
-local dragOffY  = 0   -- cursor.Y - frame.AbsolutePosition.Y at mousedown
+local dragging = false
+local dragOffX = 0
+local dragOffY = 0
 
-topBar.InputBegan:Connect(function(input)
+mainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        -- AbsolutePosition already accounts for GuiInset when IgnoreGuiInset=true
-        dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
-        dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
+        -- Only start drag when cursor is inside the topbar strip
+        local relY = input.Position.Y - mainFrame.AbsolutePosition.Y
+        if relY <= 27 then
+            dragging = true
+            dragOffX = input.Position.X - mainFrame.AbsolutePosition.X
+            dragOffY = input.Position.Y - mainFrame.AbsolutePosition.Y
+        end
     end
 end)
 
-topBar.InputEnded:Connect(function(input)
+mainFrame.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
     end
 end)
 
--- Use UserInputService.InputChanged — fires every mousemove/touch, no RunService needed
 inputSvc.InputChanged:Connect(function(input)
     if not dragging then return end
     if input.UserInputType ~= Enum.UserInputType.MouseMovement
     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    -- Position so the pixel the user grabbed stays under the cursor
     mainFrame.Position = ud2(0, input.Position.X - dragOffX, 0, input.Position.Y - dragOffY)
 end)
 
@@ -280,6 +282,7 @@ function AxewareLib:new(title)
     body.ScrollBarThickness        = 4
     body.ScrollBarImageColor3      = C.scrollBar
     body.ScrollingDirection        = Enum.ScrollingDirection.Y
+    body.ZIndexBehavior            = Enum.ZIndexBehavior.Sibling
     body.Visible                   = false
     body.Parent                    = mainFrame
 
@@ -463,6 +466,8 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.PlaceholderText                = "..."
     box.TextXAlignment                 = Enum.TextXAlignment.Left
     box.ClearTextOnFocus               = false
+    box.Active                         = true
+    box.ZIndex                         = 3   -- above the transparent btn rows (ZIndex 1)
     box.Parent                         = row
 
     local boxPad                       = Instance.new("UIPadding")
