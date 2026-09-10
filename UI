@@ -481,9 +481,19 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.Text = preset
     if not noCallbackOnStart then callback(preset) end
 
-    -- Clicking anywhere on the row manually captures focus for the TextBox
-    row.MouseButton1Click:Connect(function()
-        box:CaptureFocus()
+    -- In executor GUIs the ScrollingFrame eats clicks before they reach the TextBox.
+    -- Intercept at the UserInputService level: if the mouse is pressed while hovering
+    -- over the box's absolute bounds, manually call CaptureFocus.
+    inputSvc.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if not box.Parent then return end
+        local pos  = input.Position
+        local ap   = box.AbsolutePosition
+        local as   = box.AbsoluteSize
+        if pos.X >= ap.X and pos.X <= ap.X + as.X
+        and pos.Y >= ap.Y and pos.Y <= ap.Y + as.Y then
+            box:CaptureFocus()
+        end
     end)
 
     box.FocusLost:Connect(function()
