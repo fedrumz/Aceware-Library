@@ -426,51 +426,65 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- newTextbox
--- FIX: row height 30→36. Use a Frame row so the TextBox receives input directly
---      without an overlapping invisible TextButton blocking clicks.
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
-    -- The TextBox IS the row — full size, parented directly to the ScrollingFrame.
-    -- Nothing sits on top of it to block clicks.
-    local box                          = Instance.new("TextBox")
-    box.Name                           = title .. "Textbox"
-    box.BackgroundColor3               = C.body
-    box.BackgroundTransparency         = 0
-    box.BorderSizePixel                = 0
-    box.Size                           = ud2(1, 0, 0, 36)
-    box.Font                           = Enum.Font.GothamItalic
-    box.TextSize                       = 12
-    box.TextColor3                     = C.textGrey
-    box.PlaceholderColor3              = C.textDim
-    box.PlaceholderText                = "..."
-    box.TextXAlignment                 = Enum.TextXAlignment.Right
-    box.ClearTextOnFocus               = false
-    box.Parent                         = self.bodyFrame
-    
+    -- Outer row Frame — same as the working lib's text_box Frame
+    local row                          = Instance.new("Frame")
+    row.Name                           = title .. "Textbox"
+    row.BackgroundColor3               = C.body
+    row.BackgroundTransparency         = 1
+    row.BorderSizePixel                = 0
+    row.Size                           = ud2(1, 0, 0, 36)
+    row.Parent                         = self.bodyFrame
 
-    -- Right-side padding so text doesn't touch the edge
-    local boxPad                       = Instance.new("UIPadding")
-    boxPad.PaddingRight                = UDim.new(0, 8)
-    boxPad.Parent                      = box
-
-    -- Label drawn on top, non-interactive, left side
+    -- Label on the left
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
-    titleLbl.Position                  = ud2(0, 8, 0, 0)
-    titleLbl.Size                      = ud2(0.6, 0, 1, 0)
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(0, 110, 1, 0)
     titleLbl.Font                      = Enum.Font.Gotham
     titleLbl.TextSize                  = 14
     titleLbl.TextColor3                = C.textMain
     titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
     titleLbl.Text                      = title
-    titleLbl.Parent                    = box
+    titleLbl.Parent                    = row
+
+    -- Dark container Frame on the right — mirrors the working lib's Frame wrapper
+    local inputFrame                   = Instance.new("Frame")
+    inputFrame.BackgroundColor3        = fromRGB(45, 45, 45)
+    inputFrame.BorderSizePixel         = 0
+    inputFrame.Position                = ud2(0, 122, 0.5, -10)
+    inputFrame.Size                    = ud2(1, -130, 0, 20)
+    inputFrame.Parent                  = row
+
+    -- TextBox inside the Frame with BackgroundTransparency = 1, exactly like the working lib
+    local box                          = Instance.new("TextBox")
+    box.BackgroundTransparency         = 1
+    box.BorderSizePixel                = 0
+    box.Size                           = ud2(1, -6, 1, 0)
+    box.Position                       = ud2(0, 4, 0, 0)
+    box.Font                           = Enum.Font.Gotham
+    box.TextSize                       = 12
+    box.TextColor3                     = C.textGrey
+    box.PlaceholderColor3              = C.textDim
+    box.PlaceholderText                = "..."
+    box.TextXAlignment                 = Enum.TextXAlignment.Left
+    box.ClearTextOnFocus               = false
+    box.Text                           = ""
+    box.Parent                         = inputFrame
 
     local preset = (config[title] and config[title]) or (presetText or "")
     if config[title] then popup:new("Set " .. title .. " to " .. config[title]) end
     box.Text = preset
     if not noCallbackOnStart then callback(preset) end
 
-    box.FocusLost:Connect(function()
+    -- Exactly how the working lib does it: Focused/FocusLost on the TextBox
+    box.Focused:Connect(function()
+        tweenSvc:Create(inputFrame, TweenInfo.new(0.2), { BackgroundColor3 = fromRGB(65, 65, 65) }):Play()
+    end)
+
+    box.FocusLost:Connect(function(enterPressed)
+        tweenSvc:Create(inputFrame, TweenInfo.new(0.2), { BackgroundColor3 = fromRGB(45, 45, 45) }):Play()
         config[title] = box.Text
         saveConfig()
         callback(box.Text)
