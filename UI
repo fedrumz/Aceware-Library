@@ -433,68 +433,45 @@ end
 --      without an overlapping invisible TextButton blocking clicks.
 -- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
-    local row                          = Instance.new("TextButton")
-    row.Name                           = title .. "Textbox"
-    row.BackgroundColor3               = C.white
-    row.BackgroundTransparency         = 1
-    row.BorderSizePixel                = 0
-    row.Size                           = ud2(1, 0, 0, 36)
-    row.Text                           = ""
-    row.AutoButtonColor                = false
-    row.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
-
-    local titleLbl                     = Instance.new("TextLabel")
-    titleLbl.BackgroundTransparency    = 1
-    titleLbl.Position                  = ud2(0, 8, 0, 0)
-    titleLbl.Size                      = ud2(0, 110, 1, 0)
-    titleLbl.Font                      = Enum.Font.Gotham
-    titleLbl.TextSize                  = 14    -- FIX: 13 → 14
-    titleLbl.TextColor3                = C.textMain
-    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
-    titleLbl.Text                      = title
-    titleLbl.Parent                    = row
-
+    -- The TextBox IS the row — full size, parented directly to the ScrollingFrame.
+    -- Nothing sits on top of it to block clicks.
     local box                          = Instance.new("TextBox")
-    box.Name                           = "inputBox"
-    box.BackgroundColor3               = fromRGB(45, 45, 45)
+    box.Name                           = title .. "Textbox"
+    box.BackgroundColor3               = C.body
     box.BackgroundTransparency         = 0
     box.BorderSizePixel                = 0
-    box.Position                       = ud2(0, 122, 0.5, -11)  -- FIX: -10 → -11 for 22px height
-    box.Size                           = ud2(1, -130, 0, 22)    -- FIX: height 20 → 22
+    box.Size                           = ud2(1, 0, 0, 36)
     box.Font                           = Enum.Font.GothamItalic
     box.TextSize                       = 12
     box.TextColor3                     = C.textGrey
     box.PlaceholderColor3              = C.textDim
     box.PlaceholderText                = "..."
-    box.TextXAlignment                 = Enum.TextXAlignment.Left
+    box.TextXAlignment                 = Enum.TextXAlignment.Right
     box.ClearTextOnFocus               = false
-    box.Selectable                     = true
-    box.Parent                         = row
+    box.Parent                         = self.bodyFrame
+    self:Resize(self.bodyFrame)
 
+    -- Right-side padding so text doesn't touch the edge
     local boxPad                       = Instance.new("UIPadding")
-    boxPad.PaddingLeft                 = UDim.new(0, 5)
+    boxPad.PaddingRight                = UDim.new(0, 8)
     boxPad.Parent                      = box
+
+    -- Label drawn on top, non-interactive, left side
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 8, 0, 0)
+    titleLbl.Size                      = ud2(0.6, 0, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 14
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = box
 
     local preset = (config[title] and config[title]) or (presetText or "")
     if config[title] then popup:new("Set " .. title .. " to " .. config[title]) end
     box.Text = preset
     if not noCallbackOnStart then callback(preset) end
-
-    -- In executor GUIs the ScrollingFrame eats clicks before they reach the TextBox.
-    -- Intercept at the UserInputService level: if the mouse is pressed while hovering
-    -- over the box's absolute bounds, manually call CaptureFocus.
-    inputSvc.InputBegan:Connect(function(input)
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        if not box.Parent then return end
-        local pos  = input.Position
-        local ap   = box.AbsolutePosition
-        local as   = box.AbsoluteSize
-        if pos.X >= ap.X and pos.X <= ap.X + as.X
-        and pos.Y >= ap.Y and pos.Y <= ap.Y + as.Y then
-            box:CaptureFocus()
-        end
-    end)
 
     box.FocusLost:Connect(function()
         config[title] = box.Text
