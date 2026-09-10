@@ -1,5 +1,6 @@
 -- make scrollable, make it so it doesnt clip out of the UI
 -- make it so the elements dont clip out of the ui whilst the open/close animations are going
+-- fix dragging later
 
 local AxewareLib = { Content = {} }
 local config     = {}
