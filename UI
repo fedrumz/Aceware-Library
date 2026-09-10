@@ -277,17 +277,12 @@ local firstBodyFrame
 function AxewareLib:new(title)
     local self = setmetatable({}, { __index = AxewareLib.Content })
 
-    local body                     = Instance.new("ScrollingFrame")
+    local body                     = Instance.new("Frame")
     body.Name                      = title .. "BodyFrame"
     body.BackgroundColor3          = C.body
     body.BorderSizePixel           = 0
     body.Position                  = ud2(0, 0, 0, 54)
     body.Size                      = ud2(1, 0, 1, -54)
-    body.CanvasSize                = ud2(0, 0, 0, 0)
-    body.AutomaticCanvasSize       = Enum.AutomaticSize.Y
-    body.ScrollBarThickness        = 4
-    body.ScrollBarImageColor3      = C.scrollBar
-    body.ScrollingDirection        = Enum.ScrollingDirection.Y
     body.Visible                   = false
     body.Parent                    = mainFrame
 
@@ -358,7 +353,7 @@ function AxewareLib.Content:newBtn(title, callback, noToggle)
         btn.TextSize                   = 1
         btn.Text                       = ""
         btn.Parent                     = self.bodyFrame
-        self:Resize(self.bodyFrame)
+        
         return btn
     end
 
@@ -449,7 +444,7 @@ function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOn
     box.TextXAlignment                 = Enum.TextXAlignment.Right
     box.ClearTextOnFocus               = false
     box.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
+    
 
     -- Right-side padding so text doesn't touch the edge
     local boxPad                       = Instance.new("UIPadding")
@@ -498,7 +493,7 @@ function AxewareLib.Content:newBind(title, callback, presetKeyCode)
     row.BorderSizePixel                = 0
     row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     row.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
+    
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
@@ -585,7 +580,7 @@ function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
     row.BorderSizePixel                = 0
     row.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     row.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
+    
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
@@ -667,7 +662,7 @@ function AxewareLib.Content:newColorPicker(title, callback, presetColor)
     btn.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
+    
 
     local colorDot                     = Instance.new("Frame")
     colorDot.BorderSizePixel           = 0
@@ -871,7 +866,7 @@ function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart
     btn.Size                           = ud2(1, 0, 0, 36)    -- FIX: 30 → 36
     btn.Text                           = ""
     btn.Parent                         = self.bodyFrame
-    self:Resize(self.bodyFrame)
+    
 
     local titleLbl                     = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency    = 1
