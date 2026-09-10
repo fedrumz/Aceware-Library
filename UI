@@ -1,1229 +1,1173 @@
 -- AxewareLib.lua
--- Pixel-accurate rebuild of OwlLib source — zero asset dependencies
--- Matches original sizes, positions, colors, and logic exactly
--- Name: Axeware | Mobile touch support added alongside all existing mouse logic
+-- Pixel-accurate rebuild matching Owl Hub's visual style exactly
+-- Zero asset dependencies | Mouse + Touch support throughout
+-- Branding: Axeware
 
-local AxewareLib = {Content = {}};
-local config = {};
+local AxewareLib = { Content = {} }
+local config     = {}
 
-local placeID    = tostring(game.PlaceId);
-local httpService = game:GetService("HttpService");
+local placeID    = tostring(game.PlaceId)
+local http       = game:GetService("HttpService")
 
 pcall(function()
-    config = httpService:JSONDecode(readfile(placeID .. ".txt"));
-end);
+    config = http:JSONDecode(readfile(placeID .. ".txt"))
+end)
 
 local function saveConfig()
-    writefile(placeID .. ".txt", httpService:JSONEncode(config));
-end;
+    writefile(placeID .. ".txt", http:JSONEncode(config))
+end
 
-local tweenService = game:GetService("TweenService");
-local inputService = game:GetService("UserInputService");
-local coreGui      = game:GetService("CoreGui");
+local tweenSvc  = game:GetService("TweenService")
+local inputSvc  = game:GetService("UserInputService")
+local coreGui   = game:GetService("CoreGui")
+local players   = game:GetService("Players")
 
-local firstBodyFrame;
-local startPos;
-local dragging     = false;
-local draggableStart;
+local clamp    = math.clamp
+local floor    = math.floor
+local fromHSV  = Color3.fromHSV
+local fromRGB  = Color3.fromRGB
+local ud2      = UDim2.new
+local ud2off   = UDim2.fromOffset
 
-local mouse    = game:GetService("Players").LocalPlayer:GetMouse();
-local clamp    = math.clamp;
-local floor    = math.floor;
-local fromHSV  = Color3.fromHSV;
-local fromRGB  = Color3.fromRGB;
-local newUDim2 = UDim2.new;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- COLOURS  (sampled from Owl Hub screenshot)
+-- ─────────────────────────────────────────────────────────────────────────────
+local C = {
+    topBar     = fromRGB(25,  25,  25),   -- very dark, topbar + active tab
+    body       = fromRGB(35,  35,  35),   -- main body bg
+    tab        = fromRGB(45,  45,  45),   -- inactive tab
+    tabActive  = fromRGB(25,  25,  25),   -- active tab = same as topbar
+    row        = fromRGB(35,  35,  35),   -- row bg (transparent hover)
+    track      = fromRGB(55,  55,  55),   -- slider track
+    fill       = fromRGB(110, 110, 110),  -- slider fill
+    bind       = fromRGB(30,  30,  30),   -- bind/key button bg
+    dropdown   = fromRGB(40,  40,  40),   -- dropdown panel
+    dropOpt    = fromRGB(48,  48,  48),   -- dropdown option
+    white      = fromRGB(255, 255, 255),
+    textMain   = fromRGB(240, 240, 240),
+    textGrey   = fromRGB(170, 170, 170),
+    textDim    = fromRGB(130, 130, 130),
+    green      = fromRGB(0,   194, 94),
+    red        = fromRGB(180, 0,   0),
+    scrollBar  = fromRGB(80,  80,  80),
+}
 
--- ── Popup  (replaces rbxassetid://4743303040) ─────────────────────────────────
--- Original popup:new(msg) call is preserved exactly — same API
-local popupGui = Instance.new("ScreenGui");
-popupGui.Name           = httpService:GenerateGUID(false);
-popupGui.ResetOnSpawn   = false;
-popupGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
-popupGui.Parent         = coreGui;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POPUP  (bottom-right toast, same API as original)
+-- ─────────────────────────────────────────────────────────────────────────────
+local popupGui            = Instance.new("ScreenGui")
+popupGui.Name             = http:GenerateGUID(false)
+popupGui.ResetOnSpawn     = false
+popupGui.ZIndexBehavior   = Enum.ZIndexBehavior.Sibling
+popupGui.Parent           = coreGui
 
-local popup = {};
+local popup = {}
 function popup:new(msg)
-    local f = Instance.new("Frame");
-    f.BackgroundColor3    = fromRGB(35, 35, 35);
-    f.BorderSizePixel     = 0;
-    f.Size                = newUDim2(0, 180, 0, 22);
-    f.Position            = newUDim2(1, -190, 1, -32);
-    f.BackgroundTransparency = 0;
-    f.Parent              = popupGui;
+    local f                      = Instance.new("Frame")
+    f.BackgroundColor3           = fromRGB(30, 30, 30)
+    f.BorderSizePixel            = 0
+    f.Size                       = ud2off(200, 22)
+    f.Position                   = ud2(1, -210, 1, -34)
+    f.BackgroundTransparency     = 0
+    f.Parent                     = popupGui
 
-    local lbl = Instance.new("TextLabel");
-    lbl.BackgroundTransparency = 1;
-    lbl.Size               = newUDim2(1, -8, 1, 0);
-    lbl.Position           = newUDim2(0, 6, 0, 0);
-    lbl.Font               = Enum.Font.GothamMedium;
-    lbl.TextSize           = 11;
-    lbl.TextColor3         = fromRGB(255, 255, 255);
-    lbl.TextXAlignment     = Enum.TextXAlignment.Left;
-    lbl.TextTruncate       = Enum.TextTruncate.AtEnd;
-    lbl.Text               = msg;
-    lbl.Parent             = f;
+    local lbl                    = Instance.new("TextLabel")
+    lbl.BackgroundTransparency   = 1
+    lbl.Size                     = ud2(1, -10, 1, 0)
+    lbl.Position                 = ud2(0, 6, 0, 0)
+    lbl.Font                     = Enum.Font.GothamMedium
+    lbl.TextSize                 = 11
+    lbl.TextColor3               = C.white
+    lbl.TextXAlignment           = Enum.TextXAlignment.Left
+    lbl.TextTruncate             = Enum.TextTruncate.AtEnd
+    lbl.Text                     = msg
+    lbl.Parent                   = f
 
     delay(1.5, function()
-        tweenService:Create(f,   TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play();
-        tweenService:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play();
-        wait(0.31);
-        f:Destroy();
-    end);
-end;
+        tweenSvc:Create(f,   TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+        tweenSvc:Create(lbl, TweenInfo.new(0.3), { TextTransparency       = 1 }):Play()
+        wait(0.32)
+        f:Destroy()
+    end)
+end
 
--- ── Root ScreenGui  (replaces rbxassetid://4530443679) ────────────────────────
-local owlLibGui = Instance.new("ScreenGui");
-owlLibGui.Name           = httpService:GenerateGUID(false);
-owlLibGui.ResetOnSpawn   = false;
-owlLibGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
-owlLibGui.IgnoreGuiInset = true;
-owlLibGui.Parent         = coreGui;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ROOT GUI
+-- ─────────────────────────────────────────────────────────────────────────────
+local rootGui               = Instance.new("ScreenGui")
+rootGui.Name                = http:GenerateGUID(false)
+rootGui.ResetOnSpawn        = false
+rootGui.ZIndexBehavior      = Enum.ZIndexBehavior.Sibling
+rootGui.IgnoreGuiInset      = true
+rootGui.Parent              = coreGui
 
--- ── mainFrame  387×225  ───────────────────────────────────────────────────────
--- Original: owlLibGui.mainFrame — dark background, no border
-local mainFrame = Instance.new("Frame");
-mainFrame.Name              = "mainFrame";
-mainFrame.BackgroundColor3  = fromRGB(30, 30, 30);
-mainFrame.BorderSizePixel   = 0;
-mainFrame.Size              = newUDim2(0, 387, 0, 225);
-mainFrame.Position          = newUDim2(0.5, -193, 0.5, -112);
-mainFrame.ClipsDescendants  = true;
-mainFrame.Parent            = owlLibGui;
+-- ── mainFrame  387 × 225 ─────────────────────────────────────────────────────
+local mainFrame               = Instance.new("Frame")
+mainFrame.Name                = "mainFrame"
+mainFrame.BackgroundColor3    = C.body
+mainFrame.BorderSizePixel     = 0
+mainFrame.Size                = ud2off(387, 225)
+mainFrame.Position            = ud2(0.5, -193, 0.5, -112)
+mainFrame.ClipsDescendants    = true
+mainFrame.Parent              = rootGui
 
--- ── topBarFrame  full width × 27  ────────────────────────────────────────────
--- Original: mainFrame.topBarFrame — same dark color as main
-local topBarFrame = Instance.new("Frame");
-topBarFrame.Name             = "topBarFrame";
-topBarFrame.BackgroundColor3 = fromRGB(30, 30, 30);
-topBarFrame.BorderSizePixel  = 0;
-topBarFrame.Size             = newUDim2(1, 0, 0, 27);
-topBarFrame.Parent           = mainFrame;
+-- ── topBarFrame  full-width × 27 ─────────────────────────────────────────────
+local topBar                  = Instance.new("Frame")
+topBar.Name                   = "topBarFrame"
+topBar.BackgroundColor3       = C.topBar
+topBar.BorderSizePixel        = 0
+topBar.Size                   = ud2(1, 0, 0, 27)
+topBar.Parent                 = mainFrame
 
--- "Axeware" title  (replaces OWL HUB logo image)
-local titleLbl = Instance.new("TextLabel");
-titleLbl.BackgroundTransparency = 1;
-titleLbl.Size              = newUDim2(0, 120, 1, 0);
-titleLbl.Position          = newUDim2(0, 10, 0, 0);
-titleLbl.Font              = Enum.Font.GothamBold;
-titleLbl.TextSize          = 13;
-titleLbl.TextColor3        = fromRGB(255, 255, 255);
-titleLbl.TextXAlignment    = Enum.TextXAlignment.Left;
-titleLbl.Text              = "Axeware";
-titleLbl.Parent            = topBarFrame;
+-- Title label  ("Axeware" in bold, matches Owl Hub's bold header text)
+local titleLbl                = Instance.new("TextLabel")
+titleLbl.BackgroundTransparency = 1
+titleLbl.Size                 = ud2(0, 140, 1, 0)
+titleLbl.Position             = ud2(0, 10, 0, 0)
+titleLbl.Font                 = Enum.Font.GothamBold
+titleLbl.TextSize             = 13
+titleLbl.TextColor3           = C.white
+titleLbl.TextXAlignment       = Enum.TextXAlignment.Left
+titleLbl.Text                 = "Axeware"
+titleLbl.Parent               = topBar
 
--- exitBtn  (replaces ImageButton with rbxassetid exit icon)
--- Original tweens ImageTransparency 0↔0.2 on hover — we tween TextTransparency instead
-local exitBtn = Instance.new("TextButton");
-exitBtn.Name                 = "exitBtn";
-exitBtn.BackgroundTransparency = 1;
-exitBtn.BorderSizePixel      = 0;
-exitBtn.Size                 = newUDim2(0, 20, 0, 20);
-exitBtn.Position             = newUDim2(1, -24, 0.5, -10);
-exitBtn.Font                 = Enum.Font.GothamBold;
-exitBtn.TextSize             = 14;
-exitBtn.TextColor3           = fromRGB(200, 200, 200);
-exitBtn.TextTransparency     = 0.2;   -- matches original ImageTransparency start
-exitBtn.Text                 = "×";
-exitBtn.Parent               = topBarFrame;
+-- Helper: make a topbar icon button (×, −)
+local function makeTopBtn(symbol, xOffset)
+    local b                      = Instance.new("TextButton")
+    b.BackgroundTransparency     = 1
+    b.BorderSizePixel            = 0
+    b.Size                       = ud2off(20, 20)
+    b.Position                   = ud2(1, xOffset, 0.5, -10)
+    b.Font                       = Enum.Font.GothamBold
+    b.TextSize                   = 15
+    b.TextColor3                 = C.textGrey
+    b.TextTransparency           = 0.2
+    b.Text                       = symbol
+    b.Parent                     = topBar
 
-local exitTween  = tweenService:Create(exitBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0});
-local exitTween1 = tweenService:Create(exitBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0.2});
+    local tIn  = tweenSvc:Create(b, TweenInfo.new(0.2), { TextTransparency = 0   })
+    local tOut = tweenSvc:Create(b, TweenInfo.new(0.2), { TextTransparency = 0.2 })
+    b.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement then tIn:Play() end
+    end)
+    b.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement then tOut:Play() end
+    end)
+    return b
+end
 
-exitBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then exitTween:Play(); end;
-end);
-exitBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then exitTween1:Play(); end;
-end);
+local exitBtn = makeTopBtn("×", -24)
+local miniBtn = makeTopBtn("−", -48)
 
--- miniBtn  (replaces ImageButton with minimize icon)
-local miniBtn = Instance.new("TextButton");
-miniBtn.Name                 = "miniBtn";
-miniBtn.BackgroundTransparency = 1;
-miniBtn.BorderSizePixel      = 0;
-miniBtn.Size                 = newUDim2(0, 20, 0, 20);
-miniBtn.Position             = newUDim2(1, -48, 0.5, -10);
-miniBtn.Font                 = Enum.Font.GothamBold;
-miniBtn.TextSize             = 14;
-miniBtn.TextColor3           = fromRGB(200, 200, 200);
-miniBtn.TextTransparency     = 0.2;
-miniBtn.Text                 = "−";
-miniBtn.Parent               = topBarFrame;
+-- ── tabsFrame  full-width × 27, sits below topbar ────────────────────────────
+local tabsFrame               = Instance.new("Frame")
+tabsFrame.Name                = "tabsFrame"
+tabsFrame.BackgroundColor3    = C.tab
+tabsFrame.BorderSizePixel     = 0
+tabsFrame.Size                = ud2(1, 0, 0, 27)
+tabsFrame.Position            = ud2(0, 0, 0, 27)
+tabsFrame.ClipsDescendants    = true
+tabsFrame.Parent              = mainFrame
 
-local miniTween  = tweenService:Create(miniBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0});
-local miniTween2 = tweenService:Create(miniBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0.2});
+local tabLayout               = Instance.new("UIListLayout")
+tabLayout.FillDirection       = Enum.FillDirection.Horizontal
+tabLayout.SortOrder           = Enum.SortOrder.LayoutOrder
+tabLayout.Parent              = tabsFrame
 
-miniBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then miniTween:Play(); end;
-end);
-miniBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then miniTween2:Play(); end;
-end);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- DRAGGING  (fixed: capture AbsolutePosition at the moment drag starts)
+-- ─────────────────────────────────────────────────────────────────────────────
+local dragging      = false
+local dragStart     = Vector2.new()   -- cursor world position at mousedown
+local frameStart    = Vector2.new()   -- mainFrame.AbsolutePosition at mousedown
 
--- ── tabsFrame  (replaces the asset tabsFrame inside mainFrame) ────────────────
--- Original: mainFrame.tabsFrame — sits below topBarFrame, holds ImageButton tabs
--- Original tab body frames start at Y=54 (27 topbar + 27 tabs)
-local tabsFrame = Instance.new("Frame");
-tabsFrame.Name             = "tabsFrame";
-tabsFrame.BackgroundColor3 = fromRGB(40, 40, 40);
-tabsFrame.BorderSizePixel  = 0;
-tabsFrame.Size             = newUDim2(1, 0, 0, 27);
-tabsFrame.Position         = newUDim2(0, 0, 0, 27);
-tabsFrame.ClipsDescendants = true;
-tabsFrame.Parent           = mainFrame;
-
-local tabsLayout = Instance.new("UIListLayout");
-tabsLayout.FillDirection = Enum.FillDirection.Horizontal;
-tabsLayout.SortOrder     = Enum.SortOrder.LayoutOrder;
-tabsLayout.Parent        = tabsFrame;
-
--- ── Dragging — exact copy of original logic, + Touch ─────────────────────────
-topBarFrame.InputBegan:Connect(function(input)
+topBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
-        dragging      = true;
-        draggableStart = input.Position;
-        startPos      = mainFrame.AbsolutePosition;
-    end;
-end);
-topBarFrame.InputEnded:Connect(function(input)
+        dragging   = true
+        dragStart  = Vector2.new(input.Position.X, input.Position.Y)
+        frameStart = Vector2.new(mainFrame.AbsolutePosition.X, mainFrame.AbsolutePosition.Y)
+    end
+end)
+
+topBar.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false;
-    end;
-end);
-inputService.InputChanged:Connect(function(input)
-    if (input.UserInputType == Enum.UserInputType.MouseMovement
-    or  input.UserInputType == Enum.UserInputType.Touch) and dragging then
-        mainFrame.Position = newUDim2(0,
-            startPos.X + (input.Position.X - draggableStart.X), 0,
-            startPos.Y + (input.Position.Y - draggableStart.Y));
-    end;
-end);
+        dragging = false
+    end
+end)
 
--- ── Exit / Mini — exact copy of original click logic ─────────────────────────
+inputSvc.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    local delta = Vector2.new(input.Position.X - dragStart.X, input.Position.Y - dragStart.Y)
+    mainFrame.Position = ud2(0, frameStart.X + delta.X, 0, frameStart.Y + delta.Y)
+end)
+
+-- ── exit / minimise ──────────────────────────────────────────────────────────
 exitBtn.MouseButton1Click:Connect(function()
-    mainFrame:TweenSize(newUDim2(0, 387, 0, 27), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25);
-    wait(0.25);
-    mainFrame.topBarFrame:TweenSize(newUDim2(0, 0, 0, 27), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25);
-    mainFrame:TweenSize(newUDim2(0, 0, 0, 27), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25);
-    wait(0.25);
-    owlLibGui:Destroy();
-end);
+    mainFrame:TweenSize(ud2(0, 387, 0, 27), "Out", "Quad", 0.25)
+    wait(0.25)
+    mainFrame.topBarFrame:TweenSize(ud2(0, 0, 0, 27), "Out", "Quad", 0.25)
+    mainFrame:TweenSize(ud2(0, 0, 0, 27), "Out", "Quad", 0.25)
+    wait(0.25)
+    rootGui:Destroy()
+end)
 
 miniBtn.MouseButton1Click:Connect(function()
-    if mainFrame.Size ~= newUDim2(0, 387, 0, 27) then
-        mainFrame:TweenSize(newUDim2(0, 387, 0, 27), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true);
+    if mainFrame.Size ~= ud2(0, 387, 0, 27) then
+        mainFrame:TweenSize(ud2(0, 387, 0, 27), "Out", "Quad", 0.25, true)
     else
-        mainFrame:TweenSize(newUDim2(0, 387, 0, 225), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true);
-    end;
-end);
+        mainFrame:TweenSize(ud2(0, 387, 0, 225), "Out", "Quad", 0.25, true)
+    end
+end)
 
-inputService.InputBegan:Connect(function(input, onGui)
-    if not onGui and (input.KeyCode == Enum.KeyCode.P or input.KeyCode == Enum.KeyCode.RightShift) then
-        owlLibGui.Enabled = not owlLibGui.Enabled;
-    end;
-end);
+-- P / RightShift to toggle visibility
+inputSvc.InputBegan:Connect(function(input, onGui)
+    if not onGui and (input.KeyCode == Enum.KeyCode.P
+    or input.KeyCode == Enum.KeyCode.RightShift) then
+        rootGui.Enabled = not rootGui.Enabled
+    end
+end)
 
--- ── Shared helpers — exact copies ─────────────────────────────────────────────
-function AxewareLib:SetCategory() end;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- SHARED HELPERS
+-- ─────────────────────────────────────────────────────────────────────────────
+function AxewareLib:SetCategory() end
 
--- Original Resize: CanvasSize = (children - 1) * 36
--- We subtract UIListLayout from child count, same as original subtracting 1
-function AxewareLib.Content:Resize(scrollingFrame)
-    local count = 0;
-    for _, v in next, scrollingFrame:GetChildren() do
-        if not v:IsA("UIListLayout") then count = count + 1; end;
-    end;
-    scrollingFrame.CanvasSize = newUDim2(0, 0, 0, count * 36);
-end;
+-- Recalculate ScrollingFrame CanvasSize based on non-layout children
+function AxewareLib.Content:Resize(sf)
+    local count = 0
+    for _, v in next, sf:GetChildren() do
+        if not v:IsA("UIListLayout") then count += 1 end
+    end
+    sf.CanvasSize = ud2(0, 0, 0, count * 30)
+end
 
--- Original initBtnEffect: hover fades BackgroundTransparency 0.85 ↔ 1
+-- Hover tint: BackgroundTransparency 0.88 ↔ 1
 function AxewareLib.Content:initBtnEffect(btn)
-    local btnHover  = tweenService:Create(btn, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0.85});
-    local btnHover1 = tweenService:Create(btn, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 1});
-    btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then btnHover:Play(); end;
-    end);
-    btn.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then btnHover1:Play(); end;
-    end);
-end;
+    local tIn  = tweenSvc:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 0.88 })
+    local tOut = tweenSvc:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 1    })
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement then tIn:Play() end
+    end)
+    btn.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement then tOut:Play() end
+    end)
+end
 
--- ── AxewareLib:new(title) ─────────────────────────────────────────────────────
--- Original: loads rbxassetid://4531111462 for bodyFrame (ScrollingFrame, dark bg, sits at y=54)
---           loads rbxassetid://4530456835 for tabBtn (ImageButton sized to text + 20)
---           active tab = ImageColor3 fromRGB(30,30,30), inactive = fromRGB(50,50,50)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AxewareLib:new(title)  →  creates a tab + its body ScrollingFrame
+-- ─────────────────────────────────────────────────────────────────────────────
+local firstBodyFrame
 function AxewareLib:new(title)
-    local self = setmetatable({}, {__index = AxewareLib.Content});
+    local self = setmetatable({}, { __index = AxewareLib.Content })
 
-    -- bodyFrame: ScrollingFrame, full width, fills remaining height below both bars
-    local bodyFrame = Instance.new("ScrollingFrame");
-    bodyFrame.Name             = title .. "BodyFrame";
-    bodyFrame.BackgroundColor3 = fromRGB(40, 40, 40);
-    bodyFrame.BorderSizePixel  = 0;
-    bodyFrame.Position         = newUDim2(0, 0, 0, 54);
-    bodyFrame.Size             = newUDim2(1, 0, 1, -54);
-    bodyFrame.CanvasSize       = newUDim2(0, 0, 0, 0);
-    bodyFrame.ScrollBarThickness     = 4;
-    bodyFrame.ScrollBarImageColor3   = fromRGB(80, 80, 80);
-    bodyFrame.Visible          = false;
-    bodyFrame.Parent           = mainFrame;
+    -- Body: ScrollingFrame that fills the space below both bars (y = 54)
+    local body                     = Instance.new("ScrollingFrame")
+    body.Name                      = title .. "BodyFrame"
+    body.BackgroundColor3          = C.body
+    body.BorderSizePixel           = 0
+    body.Position                  = ud2(0, 0, 0, 54)
+    body.Size                      = ud2(1, 0, 1, -54)
+    body.CanvasSize                = ud2(0, 0, 0, 0)
+    body.ScrollBarThickness        = 4
+    body.ScrollBarImageColor3      = C.scrollBar
+    body.ScrollingDirection        = Enum.ScrollingDirection.Y
+    body.Visible                   = false
+    body.Parent                    = mainFrame
 
-    local listLayout = Instance.new("UIListLayout");
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder;
-    listLayout.Parent    = bodyFrame;
+    local ll                       = Instance.new("UIListLayout")
+    ll.SortOrder                   = Enum.SortOrder.LayoutOrder
+    ll.Parent                      = body
 
-    self.bodyFrame = bodyFrame;
+    self.bodyFrame = body
 
-    -- tabBtn: original is ImageButton sized to tabLabel.TextBounds.X + 20
-    -- We use TextButton; ImageColor3 logic → BackgroundColor3
-    local tabBtn = Instance.new("TextButton");
-    tabBtn.Name                 = title .. "TabBtn";
-    tabBtn.BackgroundColor3     = fromRGB(50, 50, 50);  -- inactive color
-    tabBtn.BorderSizePixel      = 0;
-    tabBtn.AutomaticSize        = Enum.AutomaticSize.X;
-    tabBtn.Size                 = newUDim2(0, 0, 1, 0);
-    tabBtn.Font                 = Enum.Font.GothamBold;
-    tabBtn.TextSize             = 11;
-    tabBtn.TextColor3           = fromRGB(180, 180, 180);
-    tabBtn.Text                 = string.upper(title);
-    tabBtn.Parent               = tabsFrame;
+    -- Tab button
+    local tab                      = Instance.new("TextButton")
+    tab.Name                       = title .. "TabBtn"
+    tab.BackgroundColor3           = C.tab
+    tab.BorderSizePixel            = 0
+    tab.AutomaticSize              = Enum.AutomaticSize.X
+    tab.Size                       = ud2(0, 0, 1, 0)
+    tab.Font                       = Enum.Font.GothamBold
+    tab.TextSize                   = 11
+    tab.TextColor3                 = C.textGrey
+    tab.Text                       = string.upper(title)
+    tab.Parent                     = tabsFrame
 
-    -- Padding matches original tabLabel.TextBounds.X + 20 sizing (10px each side)
-    local tpad = Instance.new("UIPadding");
-    tpad.PaddingLeft  = UDim.new(0, 10);
-    tpad.PaddingRight = UDim.new(0, 10);
-    tpad.Parent       = tabBtn;
+    local pad                      = Instance.new("UIPadding")
+    pad.PaddingLeft                = UDim.new(0, 12)
+    pad.PaddingRight               = UDim.new(0, 12)
+    pad.Parent                     = tab
 
+    -- First tab starts active
     if not firstBodyFrame then
-        firstBodyFrame         = bodyFrame;
-        bodyFrame.Visible      = true;
-        tabBtn.BackgroundColor3 = fromRGB(30, 30, 30);  -- active color matches original
-        tabBtn.TextColor3       = fromRGB(255, 255, 255);
-    end;
+        firstBodyFrame       = body
+        body.Visible         = true
+        tab.BackgroundColor3 = C.tabActive
+        tab.TextColor3       = C.white
+    end
 
-    tabBtn.MouseButton1Click:Connect(function()
-        -- Exact original logic: hide all BodyFrames, reset all tab colors
+    tab.MouseButton1Click:Connect(function()
+        -- Hide all body frames, reset all tabs
         for _, v in next, mainFrame:GetChildren() do
-            if v.Name:find("BodyFrame") then
-                if v ~= bodyFrame then v.Visible = false; end;
-            end;
-        end;
+            if v.Name:find("BodyFrame") and v ~= body then
+                v.Visible = false
+            end
+        end
         for _, v in next, tabsFrame:GetChildren() do
             if v:IsA("TextButton") then
-                v.BackgroundColor3 = fromRGB(50, 50, 50);
-                v.TextColor3       = fromRGB(180, 180, 180);
-            end;
-        end;
-        tabBtn.BackgroundColor3 = fromRGB(30, 30, 30);
-        tabBtn.TextColor3       = fromRGB(255, 255, 255);
-        bodyFrame.Visible       = true;
-    end);
+                v.BackgroundColor3 = C.tab
+                v.TextColor3       = C.textGrey
+            end
+        end
+        tab.BackgroundColor3 = C.tabActive
+        tab.TextColor3       = C.white
+        body.Visible         = true
+    end)
 
-    -- Mobile: TouchTap fires the same click
-    tabBtn.TouchTap:Connect(function()
-        tabBtn.MouseButton1Click:Fire();
-    end);
+    tab.TouchTap:Connect(function() tab.MouseButton1Click:Fire() end)
 
-    return self;
-end;
+    return self
+end
 
--- ── newBtn ────────────────────────────────────────────────────────────────────
--- Original toggle btn (rbxassetid://4531129509):
---   30px tall, width = titleLabel.TextBounds.X + 50
---   has .statusFrame (small colored square, left side)
---   has .titleLabel (text, right of status)
---   BackgroundTransparency = 1, hover fades to 0.85
---
--- Original action btn (rbxassetid://4531209476):
---   30px tall, width = titleLabel.TextBounds.X + 17
---   no statusFrame, just titleLabel
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newBtn  (toggle or action)
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBtn(title, callback, noToggle)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
+
+    -- Shared row factory
+    local function makeRow()
+        local btn                      = Instance.new("TextButton")
+        btn.BackgroundColor3           = C.white
+        btn.BackgroundTransparency     = 1
+        btn.BorderSizePixel            = 0
+        btn.Size                       = ud2(1, 0, 0, 30)
+        btn.Font                       = Enum.Font.Gotham
+        btn.TextSize                   = 1
+        btn.Text                       = ""
+        btn.Parent                     = self.bodyFrame
+        return btn
+    end
+
+    local function makeLabel(parent, xPos, xSize, text)
+        local lbl                      = Instance.new("TextLabel")
+        lbl.BackgroundTransparency     = 1
+        lbl.Position                   = ud2(0, xPos, 0, 0)
+        lbl.Size                       = ud2(1, xSize, 1, 0)
+        lbl.Font                       = Enum.Font.Gotham
+        lbl.TextSize                   = 13
+        lbl.TextColor3                 = C.textMain
+        lbl.TextXAlignment             = Enum.TextXAlignment.Left
+        lbl.Text                       = text
+        lbl.Parent                     = parent
+        return lbl
+    end
 
     if not noToggle then
-        local enabled = config[title] and true or false;
-        if enabled then
-            callback(enabled);
-            popup:new("Enabled " .. title);
-        end;
+        -- ── Toggle button ─────────────────────────────────────────────────────
+        local enabled = config[title] and true or false
+        if enabled then callback(enabled); popup:new("Enabled " .. title) end
 
-        -- btn: full-width row, 30px tall, transparent bg (hover tween to 0.85)
-        -- Original sized to text width but in practice these fill the frame scrolled
-        local btn = Instance.new("TextButton");
-        btn.Name                  = title .. "Btn";
-        btn.BackgroundColor3      = fromRGB(50, 50, 50);
-        btn.BackgroundTransparency = 1;
-        btn.BorderSizePixel       = 0;
-        btn.Size                  = newUDim2(1, 0, 0, 30);
-        btn.Font                  = Enum.Font.Gotham;
-        btn.TextSize              = 1;
-        btn.Text                  = "";
-        btn.Parent                = self.bodyFrame;
+        local btn = makeRow()
 
-        -- statusFrame: small square, left side — green=on, red=off
-        -- Original: Frame named statusFrame inside the asset btn
-        local statusFrame = Instance.new("Frame");
-        statusFrame.Name             = "statusFrame";
-        statusFrame.BackgroundColor3 = enabled and fromRGB(0, 194, 94) or fromRGB(180, 0, 0);
-        statusFrame.BorderSizePixel  = 0;
-        statusFrame.Size             = newUDim2(0, 10, 0, 10);
-        statusFrame.Position         = newUDim2(0, 8, 0.5, -5);
-        statusFrame.Parent           = btn;
+        -- Status dot  (12×12, matches Owl Hub's colored square indicator)
+        local dot                      = Instance.new("Frame")
+        dot.Name                       = "statusFrame"
+        dot.BorderSizePixel            = 0
+        dot.Size                       = ud2off(12, 12)
+        dot.Position                   = ud2(0, 10, 0.5, -6)
+        dot.BackgroundColor3           = enabled and C.green or C.red
+        dot.Parent                     = btn
 
-        -- titleLabel: text right of statusFrame
-        local titleLabel = Instance.new("TextLabel");
-        titleLabel.Name                = "titleLabel";
-        titleLabel.BackgroundTransparency = 1;
-        titleLabel.Position            = newUDim2(0, 24, 0, 0);
-        titleLabel.Size                = newUDim2(1, -24, 1, 0);
-        titleLabel.Font                = Enum.Font.Gotham;
-        titleLabel.TextSize            = 13;
-        titleLabel.TextColor3          = fromRGB(255, 255, 255);
-        titleLabel.TextXAlignment      = Enum.TextXAlignment.Left;
-        titleLabel.Text                = title;
-        titleLabel.Parent              = btn;
+        makeLabel(btn, 28, -36, title)   -- xSize -36 leaves gap for scroll bar
+        self:initBtnEffect(btn)
 
-        local toggle = {[true] = fromRGB(0, 194, 94), [false] = fromRGB(180, 0, 0)};
+        local colorMap = { [true] = C.green, [false] = C.red }
+        local function setEnabled(val)
+            enabled = val
+            config[title] = val
+            saveConfig()
+            tweenSvc:Create(dot, TweenInfo.new(0.25), { BackgroundColor3 = colorMap[val] }):Play()
+            callback(val)
+            popup:new((val and "Enabled " or "Disabled ") .. title)
+        end
 
-        tweenService:Create(statusFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            {BackgroundColor3 = toggle[enabled]}):Play();
-
-        self:initBtnEffect(btn);
-
-        btn.MouseButton1Click:Connect(function()
-            enabled = not enabled;
-            config[title] = enabled;
-            saveConfig();
-            tweenService:Create(statusFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                {BackgroundColor3 = toggle[enabled]}):Play();
-            callback(enabled);
-            popup:new((enabled and "Enabled " or "Disabled ") .. title);
-        end);
-
-        btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire(); end);
+        btn.MouseButton1Click:Connect(function() setEnabled(not enabled) end)
+        btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire() end)
 
         return {
-            Set = function(_, bool)
-                enabled = bool;
-                config[title] = enabled;
-                saveConfig();
-                tweenService:Create(statusFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    {BackgroundColor3 = toggle[enabled]}):Play();
-                callback(enabled);
-                popup:new((enabled and "Enabled " or "Disabled ") .. title);
-            end;
-        };
+            Set = function(_, bool) setEnabled(bool) end
+        }
 
     else
-        -- noToggle action button — no statusFrame
-        local btn = Instance.new("TextButton");
-        btn.Name                  = title .. "Btn";
-        btn.BackgroundColor3      = fromRGB(50, 50, 50);
-        btn.BackgroundTransparency = 1;
-        btn.BorderSizePixel       = 0;
-        btn.Size                  = newUDim2(1, 0, 0, 30);
-        btn.Font                  = Enum.Font.Gotham;
-        btn.TextSize              = 1;
-        btn.Text                  = "";
-        btn.Parent                = self.bodyFrame;
-
-        local titleLabel = Instance.new("TextLabel");
-        titleLabel.Name                = "titleLabel";
-        titleLabel.BackgroundTransparency = 1;
-        titleLabel.Position            = newUDim2(0, 8, 0, 0);
-        titleLabel.Size                = newUDim2(1, -8, 1, 0);
-        titleLabel.Font                = Enum.Font.Gotham;
-        titleLabel.TextSize            = 13;
-        titleLabel.TextColor3          = fromRGB(255, 255, 255);
-        titleLabel.TextXAlignment      = Enum.TextXAlignment.Left;
-        titleLabel.Text                = title;
-        titleLabel.Parent              = btn;
-
-        self:initBtnEffect(btn);
+        -- ── Action button (no toggle, no dot) ────────────────────────────────
+        local btn = makeRow()
+        makeLabel(btn, 10, -18, title)
+        self:initBtnEffect(btn)
 
         btn.MouseButton1Click:Connect(function()
-            callback();
-            popup:new("Enabled " .. title);
-        end);
-
-        btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire(); end);
+            callback()
+            popup:new("Fired " .. title)
+        end)
+        btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire() end)
 
         return {
-            Fire = function(_)
-                callback();
-                popup:new("Enabled " .. title);
-            end;
-        };
-    end;
-end;
+            Fire = function(_) callback(); popup:new("Fired " .. title) end
+        }
+    end
+end
 
--- ── newSlider ─────────────────────────────────────────────────────────────────
--- Original (rbxassetid://4531326550):
---   30px tall, width = titleLabel.TextBounds.X + 195
---   has .titleLabel on left
---   has .sliderIndicatorFrame (the track) — contains:
---       .valueLabel (italic, right side of track)
---       .slidingFrame (the fill, child of sliderIndicatorFrame)
---   slide() reads input.Position.X relative to sliderIndicatorFrame
-function AxewareLib.Content:newSlider(title, callback, min, max, startPoint)
-    self:Resize(self.bodyFrame);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newSlider  (fixed formula + touch)
+-- ─────────────────────────────────────────────────────────────────────────────
+function AxewareLib.Content:newSlider(title, callback, minVal, maxVal, startVal)
+    self:Resize(self.bodyFrame)
 
-    local dragging = false;
+    local sliding = false
 
-    -- Outer row (matches original sliderFrame)
-    local sliderFrame = Instance.new("Frame");
-    sliderFrame.Name             = title .. "Slider";
-    sliderFrame.BackgroundTransparency = 1;
-    sliderFrame.BorderSizePixel  = 0;
-    sliderFrame.Size             = newUDim2(1, 0, 0, 30);
-    sliderFrame.Parent           = self.bodyFrame;
+    local row                          = Instance.new("Frame")
+    row.Name                           = title .. "Slider"
+    row.BackgroundTransparency         = 1
+    row.BorderSizePixel                = 0
+    row.Size                           = ud2(1, 0, 0, 30)
+    row.Parent                         = self.bodyFrame
 
-    -- titleLabel: left side, same font/size as btn titleLabel
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.Name               = "titleLabel";
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 8, 0, 0);
-    titleLabel.Size               = newUDim2(0, 100, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = sliderFrame;
+    -- Title label
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(0, 110, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = row
 
-    -- sliderIndicatorFrame: the dark track, sits right of title
-    -- Original width fills to right edge; we mirror the +195 sizing
-    local sliderIndicatorFrame = Instance.new("Frame");
-    sliderIndicatorFrame.Name             = "sliderIndicatorFrame";
-    sliderIndicatorFrame.BackgroundColor3 = fromRGB(50, 50, 50);
-    sliderIndicatorFrame.BorderSizePixel  = 0;
-    sliderIndicatorFrame.Position         = newUDim2(0, 112, 0.5, -5);
-    sliderIndicatorFrame.Size             = newUDim2(1, -160, 0, 10);
-    sliderIndicatorFrame.Parent           = sliderFrame;
+    -- Track  (sits right of title, ends before scroll-bar gap)
+    local track                        = Instance.new("Frame")
+    track.Name                         = "sliderIndicatorFrame"
+    track.BackgroundColor3             = C.track
+    track.BorderSizePixel              = 0
+    track.Position                     = ud2(0, 124, 0.5, -5)
+    track.Size                         = ud2(1, -170, 0, 10)
+    track.Parent                       = row
 
-    -- slidingFrame: the lighter fill inside the track
-    local slidingFrame = Instance.new("Frame");
-    slidingFrame.Name             = "slidingFrame";
-    slidingFrame.BackgroundColor3 = fromRGB(100, 100, 100);
-    slidingFrame.BorderSizePixel  = 0;
-    slidingFrame.Size             = newUDim2(0, 0, 1, 0);
-    slidingFrame.Parent           = sliderIndicatorFrame;
+    -- Fill
+    local fill                         = Instance.new("Frame")
+    fill.Name                          = "slidingFrame"
+    fill.BackgroundColor3              = C.fill
+    fill.BorderSizePixel               = 0
+    fill.Size                          = ud2(0, 0, 1, 0)
+    fill.Parent                        = track
 
-    -- valueLabel: italic grey, right of the track
-    -- Original: inside sliderIndicatorFrame, shown as italic number
-    local valueLabel = Instance.new("TextLabel");
-    valueLabel.Name               = "valueLabel";
-    valueLabel.BackgroundTransparency = 1;
-    valueLabel.Position           = newUDim2(1, 6, 0, 0);
-    valueLabel.Size               = newUDim2(0, 36, 1, 0);
-    valueLabel.Font               = Enum.Font.GothamItalic;
-    valueLabel.TextSize           = 12;
-    valueLabel.TextColor3         = fromRGB(150, 150, 150);
-    valueLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    valueLabel.Text               = "0";
-    valueLabel.Parent             = sliderFrame;  -- parented to row so it sits right of track
+    -- Value label  (italic, right of track)
+    local valLbl                       = Instance.new("TextLabel")
+    valLbl.Name                        = "valueLabel"
+    valLbl.BackgroundTransparency      = 1
+    valLbl.Position                    = ud2(1, 6, 0, 0)
+    valLbl.Size                        = ud2(0, 38, 1, 0)
+    valLbl.Font                        = Enum.Font.GothamItalic
+    valLbl.TextSize                    = 12
+    valLbl.TextColor3                  = C.textDim
+    valLbl.TextXAlignment              = Enum.TextXAlignment.Left
+    valLbl.Text                        = "0"
+    valLbl.Parent                      = track
 
-    -- Reposition valueLabel relative to sliderIndicatorFrame right edge
-    -- We handle this by parenting to sliderIndicatorFrame instead:
-    valueLabel.Parent   = sliderIndicatorFrame;
-    valueLabel.Position = newUDim2(1, 4, 0, 0);
-    valueLabel.Size     = newUDim2(0, 36, 1, 0);
+    -- Correct mapping: scale → value in [minVal, maxVal]
+    local function scaleToVal(scale)
+        return floor(minVal + scale * (maxVal - minVal))
+    end
 
-    local sp = config[title] and tonumber(config[title]) or startPoint;
+    local function applyStart(val)
+        local scale = clamp((val - minVal) / (maxVal - minVal), 0, 1)
+        fill.Size   = ud2(scale, 0, 1, 0)
+        valLbl.Text = tostring(floor(val))
+        callback(floor(val))
+    end
 
-    -- Exact original formula: floor((startPoint / max) * (max - min) + min)
-    local function computeDisplay(scale)
-        return floor((scale * max / max) * (max - min) + min);
-    end;
-
+    local sp = config[title] and tonumber(config[title]) or startVal
     if sp then
-        local initScale = clamp(sp / max, 0, 1);
-        slidingFrame.Size = newUDim2(initScale, 0, 1, 0);
-        valueLabel.Text   = tostring(computeDisplay(initScale));
-        callback(computeDisplay(initScale));
+        applyStart(sp)
         if config[title] then
-            popup:new("Set " .. title .. " to " .. tostring(computeDisplay(initScale)));
-        end;
-    end;
+            popup:new("Set " .. title .. " to " .. tostring(floor(sp)))
+        end
+    end
 
-    -- slide() — exact copy of original
     local function slide(input)
-        local pos = newUDim2(clamp(
-            (input.Position.X - sliderIndicatorFrame.AbsolutePosition.X) / sliderIndicatorFrame.AbsoluteSize.X,
-            0, 1), 0, 1, 0);
-        slidingFrame:TweenSize(pos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-        local value = floor(((pos.X.Scale * max) / max) * (max - min) + min);
-        valueLabel.Text = tostring(value);
-        callback(value);
-    end;
+        local rel   = (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X
+        local scale = clamp(rel, 0, 1)
+        local val   = scaleToVal(scale)
+        fill:TweenSize(ud2(scale, 0, 1, 0), "Out", "Quad", 0.07, true)
+        valLbl.Text = tostring(val)
+        callback(val)
+    end
 
-    sliderIndicatorFrame.InputBegan:Connect(function(input)
+    track.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
-            slide(input);
-            dragging = true;
-        end;
-    end);
-    sliderIndicatorFrame.InputEnded:Connect(function(input)
+            sliding = true
+            slide(input)
+        end
+    end)
+
+    track.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false;
-            config[title] = valueLabel.Text;
-            saveConfig();
-            popup:new("Set " .. title .. " to " .. valueLabel.Text);
-        end;
-    end);
-    inputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch) then
-            slide(input);
-        end;
-    end);
-end;
+            sliding = false
+            config[title] = valLbl.Text
+            saveConfig()
+            popup:new("Set " .. title .. " to " .. valLbl.Text)
+        end
+    end)
 
--- ── newTextbox ────────────────────────────────────────────────────────────────
--- Original (rbxassetid://4531463561):
---   30px tall, width = titleLabel.TextBounds.X + 100
---   .titleLabel on left
---   .inputBox on right (italic, same grey as slider value)
+    inputSvc.InputChanged:Connect(function(input)
+        if not sliding then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            slide(input)
+        end
+    end)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newTextbox
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newTextbox(title, callback, presetText, noCallbackOnStart)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
 
-    local row = Instance.new("Frame");
-    row.Name                  = title .. "Textbox";
-    row.BackgroundTransparency = 1;
-    row.BorderSizePixel       = 0;
-    row.Size                  = newUDim2(1, 0, 0, 30);
-    row.Parent                = self.bodyFrame;
+    local row                          = Instance.new("Frame")
+    row.Name                           = title .. "Textbox"
+    row.BackgroundTransparency         = 1
+    row.BorderSizePixel                = 0
+    row.Size                           = ud2(1, 0, 0, 30)
+    row.Parent                         = self.bodyFrame
 
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.Name               = "titleLabel";
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 8, 0, 0);
-    titleLabel.Size               = newUDim2(0, 110, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = row;
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(0, 110, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = row
 
-    -- inputBox: italic grey, right of title — same style as original .inputBox
-    local inputBox = Instance.new("TextBox");
-    inputBox.Name               = "inputBox";
-    inputBox.BackgroundTransparency = 1;
-    inputBox.Position           = newUDim2(0, 122, 0, 0);
-    inputBox.Size               = newUDim2(1, -130, 1, 0);
-    inputBox.Font               = Enum.Font.GothamItalic;
-    inputBox.TextSize           = 12;
-    inputBox.TextColor3         = fromRGB(150, 150, 150);
-    inputBox.PlaceholderColor3  = fromRGB(100, 100, 100);
-    inputBox.PlaceholderText    = "";
-    inputBox.TextXAlignment     = Enum.TextXAlignment.Left;
-    inputBox.ClearTextOnFocus   = false;
-    inputBox.Parent             = row;
+    -- Input box: matches Owl Hub's italic grey inputBox style
+    local box                          = Instance.new("TextBox")
+    box.Name                           = "inputBox"
+    box.BackgroundColor3               = C.track
+    box.BackgroundTransparency         = 0.4
+    box.BorderSizePixel                = 0
+    box.Position                       = ud2(0, 124, 0.5, -10)
+    box.Size                           = ud2(1, -170, 0, 20)
+    box.Font                           = Enum.Font.GothamItalic
+    box.TextSize                       = 12
+    box.TextColor3                     = C.textGrey
+    box.PlaceholderColor3              = C.textDim
+    box.PlaceholderText                = "..."
+    box.TextXAlignment                 = Enum.TextXAlignment.Left
+    box.ClearTextOnFocus               = false
+    box.Parent                         = row
 
-    local preset = (config[title] and config[title]) or (presetText or "");
-    if config[title] then
-        popup:new("Set " .. title .. " to " .. config[title]);
-    end;
-    inputBox.Text = preset;
+    local boxPad                       = Instance.new("UIPadding")
+    boxPad.PaddingLeft                 = UDim.new(0, 5)
+    boxPad.Parent                      = box
 
-    if not noCallbackOnStart then callback(preset); end;
+    local preset = (config[title] and config[title]) or (presetText or "")
+    if config[title] then popup:new("Set " .. title .. " to " .. config[title]) end
+    box.Text = preset
+    if not noCallbackOnStart then callback(preset) end
 
-    inputBox.FocusLost:Connect(function()
-        config[title] = inputBox.Text;
-        saveConfig();
-        callback(inputBox.Text);
-        popup:new("Set " .. title .. " to " .. inputBox.Text);
-    end);
-end;
+    box.FocusLost:Connect(function()
+        config[title] = box.Text
+        saveConfig()
+        callback(box.Text)
+        popup:new("Set " .. title .. " to " .. box.Text)
+    end)
+end
 
--- ── newBind ───────────────────────────────────────────────────────────────────
--- Original (rbxassetid://4531229816):
---   30px tall, width = titleLabel.TextBounds.X + 90
---   .titleLabel left, .bindBtn right (small dark button showing key name)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newBind  (toggle on/off each press)
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newBind(title, callback, presetKeyCode)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
 
-    local enabled    = false;
-    local listening  = false;
-    presetKeyCode    = config[title] and Enum.KeyCode[config[title]] or presetKeyCode;
-    local activated  = presetKeyCode and true or false;
-    local keyCode    = presetKeyCode;
+    local enabled   = false
+    local listening = false
+    presetKeyCode   = config[title] and Enum.KeyCode[config[title]] or presetKeyCode
+    local activated = presetKeyCode ~= nil
+    local keyCode   = presetKeyCode
 
-    local row = Instance.new("Frame");
-    row.Name                  = title .. "Bind";
-    row.BackgroundTransparency = 1;
-    row.BorderSizePixel       = 0;
-    row.Size                  = newUDim2(1, 0, 0, 30);
-    row.Parent                = self.bodyFrame;
+    local row                          = Instance.new("Frame")
+    row.Name                           = title .. "Bind"
+    row.BackgroundTransparency         = 1
+    row.BorderSizePixel                = 0
+    row.Size                           = ud2(1, 0, 0, 30)
+    row.Parent                         = self.bodyFrame
 
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 8, 0, 0);
-    titleLabel.Size               = newUDim2(1, -80, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = row;
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(1, -80, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = row
 
-    local bindBtn = Instance.new("TextButton");
-    bindBtn.Name             = "bindBtn";
-    bindBtn.BackgroundColor3 = fromRGB(30, 30, 30);
-    bindBtn.BorderSizePixel  = 0;
-    bindBtn.Size             = newUDim2(0, 55, 0, 18);
-    bindBtn.Position         = newUDim2(1, -62, 0.5, -9);
-    bindBtn.Font             = Enum.Font.GothamBold;
-    bindBtn.TextSize         = 10;
-    bindBtn.TextColor3       = fromRGB(200, 200, 200);
-    bindBtn.Text             = presetKeyCode and string.upper(tostring(string.char(presetKeyCode.Value))) or "KEY";
-    bindBtn.Parent           = row;
+    local bindBtn                      = Instance.new("TextButton")
+    bindBtn.Name                       = "bindBtn"
+    bindBtn.BackgroundColor3           = C.bind
+    bindBtn.BorderSizePixel            = 0
+    bindBtn.Size                       = ud2off(60, 18)
+    bindBtn.Position                   = ud2(1, -68, 0.5, -9)
+    bindBtn.Font                       = Enum.Font.GothamBold
+    bindBtn.TextSize                   = 10
+    bindBtn.TextColor3                 = C.textGrey
+    bindBtn.Text                       = presetKeyCode
+        and string.upper(tostring(string.char(presetKeyCode.Value)))
+        or "KEY"
+    bindBtn.Parent                     = row
 
-    if config[title] then
-        popup:new("Set " .. title .. " to " .. bindBtn.Text);
-    end;
+    if config[title] then popup:new("Set " .. title .. " to " .. bindBtn.Text) end
 
-    inputService.InputBegan:Connect(function(input, onGui)
-        if onGui then return; end;
+    inputSvc.InputBegan:Connect(function(input, onGui)
+        if onGui then return end
         if listening and not activated then
             pcall(function()
-                bindBtn.Text = string.upper(tostring(string.char(input.KeyCode.Value)));
-                listening    = false;
-                config[title] = input.KeyCode.Name;
-                saveConfig();
-                keyCode   = input.KeyCode;
-                activated = true;
-                popup:new("Set " .. title .. " to " .. bindBtn.Text);
-            end);
+                bindBtn.Text  = string.upper(tostring(string.char(input.KeyCode.Value)))
+                listening     = false
+                config[title] = input.KeyCode.Name
+                saveConfig()
+                keyCode   = input.KeyCode
+                activated = true
+                popup:new("Set " .. title .. " to " .. bindBtn.Text)
+            end)
         elseif activated and not listening and input.KeyCode == keyCode then
-            enabled = not enabled;
-            callback(enabled);
-        end;
-    end);
+            enabled = not enabled
+            callback(enabled)
+        end
+    end)
 
     bindBtn.MouseButton1Click:Connect(function()
-        bindBtn.Text = "...";
-        activated    = false;
-        listening    = true;
-    end);
-end;
+        bindBtn.Text = "..."
+        activated    = false
+        listening    = true
+    end)
+end
 
--- ── newCBind ──────────────────────────────────────────────────────────────────
--- Exact copy of original newCBind — same asset visual as newBind
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newCBind  (hold bind: true while key held, false on release)
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newCBind(title, callback, presetKeyCode)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
 
     local shortNames = {
-        RightControl = 'RightCtrl'; LeftControl = 'LeftCtrl';
-        LeftShift = 'LShift';       RightShift = 'RShift';
+        RightControl = "RightCtrl"; LeftControl = "LeftCtrl";
+        LeftShift    = "LShift";    RightShift  = "RShift";
         MouseButton1 = "Mouse1";    MouseButton2 = "Mouse2";
-    };
+    }
 
-    presetKeyCode = presetKeyCode and presetKeyCode;
+    presetKeyCode = presetKeyCode or nil
     if config[title] then
-        local keyboard = config[title]:find("Keyboard");
-        if keyboard then
-            presetKeyCode = Enum.KeyCode[config[title]:gsub("Keyboard", "")];
-        else
-            presetKeyCode = Enum.UserInputType[config[title]];
-        end;
-        popup:new("Set " .. title .. " to " .. (shortNames[presetKeyCode.Name] or presetKeyCode.Name));
-    end;
+        local kb = config[title]:find("Keyboard")
+        presetKeyCode = kb
+            and Enum.KeyCode[config[title]:gsub("Keyboard", "")]
+            or  Enum.UserInputType[config[title]]
+        popup:new("Set " .. title .. " to " ..
+            (shortNames[presetKeyCode.Name] or presetKeyCode.Name))
+    end
 
-    local activated = presetKeyCode and true or false;
-    local keyCode   = presetKeyCode;
-    local nm        = presetKeyCode and (shortNames[presetKeyCode.Name] or presetKeyCode.Name) or "None";
+    local activated = presetKeyCode ~= nil
+    local keyCode   = presetKeyCode
+    local nm        = presetKeyCode
+        and (shortNames[presetKeyCode.Name] or presetKeyCode.Name)
+        or  "None"
 
-    local row = Instance.new("Frame");
-    row.Name                  = title .. "CBind";
-    row.BackgroundTransparency = 1;
-    row.BorderSizePixel       = 0;
-    row.Size                  = newUDim2(1, 0, 0, 30);
-    row.Parent                = self.bodyFrame;
+    local row                          = Instance.new("Frame")
+    row.Name                           = title .. "CBind"
+    row.BackgroundTransparency         = 1
+    row.BorderSizePixel                = 0
+    row.Size                           = ud2(1, 0, 0, 30)
+    row.Parent                         = self.bodyFrame
 
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 8, 0, 0);
-    titleLabel.Size               = newUDim2(1, -80, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = row;
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(1, -80, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = row
 
-    local bindBtn = Instance.new("TextButton");
-    bindBtn.Name             = "bindBtn";
-    bindBtn.BackgroundColor3 = fromRGB(30, 30, 30);
-    bindBtn.BorderSizePixel  = 0;
-    bindBtn.Size             = newUDim2(0, 55, 0, 18);
-    bindBtn.Position         = newUDim2(1, -62, 0.5, -9);
-    bindBtn.Font             = Enum.Font.GothamBold;
-    bindBtn.TextSize         = 10;
-    bindBtn.TextColor3       = fromRGB(200, 200, 200);
-    bindBtn.Text             = nm;
-    bindBtn.Parent           = row;
+    local bindBtn                      = Instance.new("TextButton")
+    bindBtn.BackgroundColor3           = C.bind
+    bindBtn.BorderSizePixel            = 0
+    bindBtn.Size                       = ud2off(60, 18)
+    bindBtn.Position                   = ud2(1, -68, 0.5, -9)
+    bindBtn.Font                       = Enum.Font.GothamBold
+    bindBtn.TextSize                   = 10
+    bindBtn.TextColor3                 = C.textGrey
+    bindBtn.Text                       = nm
+    bindBtn.Parent                     = row
 
-    local function isreallypressed(bind, inp)
-        local key = bind;
-        if typeof(key) == "Instance" then
-            if key.UserInputType == Enum.UserInputType.Keyboard and inp.KeyCode == key.KeyCode then return true; end;
-            if tostring(key.UserInputType):find("MouseButton") and inp.UserInputType == key.UserInputType then return true; end;
-        end;
-        if tostring(key):find("MouseButton") then return key == inp.UserInputType; end;
-        return key == inp.KeyCode;
-    end;
+    local function isPressed(bind, inp)
+        if typeof(bind) == "Instance" then
+            if bind.UserInputType == Enum.UserInputType.Keyboard
+            and inp.KeyCode == bind.KeyCode then return true end
+            if tostring(bind.UserInputType):find("MouseButton")
+            and inp.UserInputType == bind.UserInputType then return true end
+        end
+        if tostring(bind):find("MouseButton") then
+            return bind == inp.UserInputType
+        end
+        return bind == inp.KeyCode
+    end
 
-    inputService.InputBegan:Connect(function(input, onGui)
-        if onGui then return; end;
-        if activated and isreallypressed(keyCode, input) then callback(true); end;
-    end);
-    inputService.InputEnded:Connect(function(input, onGui)
-        if onGui then return; end;
-        if activated and isreallypressed(keyCode, input) then callback(false); end;
-    end);
+    inputSvc.InputBegan:Connect(function(input, onGui)
+        if onGui then return end
+        if activated and isPressed(keyCode, input) then callback(true) end
+    end)
+    inputSvc.InputEnded:Connect(function(input, onGui)
+        if onGui then return end
+        if activated and isPressed(keyCode, input) then callback(false) end
+    end)
 
     bindBtn.MouseButton1Click:Connect(function()
-        bindBtn.Text = "...";
-        activated    = false;
-        local input  = inputService.InputBegan:Wait();
+        bindBtn.Text = "..."
+        activated    = false
+        local input  = inputSvc.InputBegan:Wait()
         config[title] = (input.UserInputType ~= Enum.UserInputType.Keyboard
-            and input.UserInputType.Name or input.KeyCode.Name .. "Keyboard");
-        saveConfig();
-        keyCode = input;
+            and input.UserInputType.Name
+            or  input.KeyCode.Name .. "Keyboard")
+        saveConfig()
+        keyCode = input
         local name = (input.UserInputType ~= Enum.UserInputType.Keyboard
             and (shortNames[input.UserInputType.Name] or input.UserInputType.Name)
-            or  input.KeyCode.Name);
-        bindBtn.Text = name;
-        activated    = true;
-        popup:new("Set " .. title .. " to " .. name);
-    end);
-end;
+            or   input.KeyCode.Name)
+        bindBtn.Text = name
+        activated    = true
+        popup:new("Set " .. title .. " to " .. name)
+    end)
+end
 
--- ── newColorPicker ────────────────────────────────────────────────────────────
--- Original (rbxassetid://4531551348):
---   30px row with .colorFrame (small square left) and .titleLabel
---   expands .colorPickingFrame below (170×120 when open)
---   contains .hueSatFrame (ImageLabel gradient), .valueFrame (vertical gradient),
---   .rainbowBtn (TextButton bottom)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newColorPicker
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newColorPicker(title, callback, presetColor)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
 
-    local oldSize;
-    local rainbow        = false;
-    local hueSatDragging = false;
-    local valueDragging  = false;
-    local h              = 0;
+    local oldSize
+    local rainbow        = false
+    local hueSatDrag     = false
+    local valDrag        = false
+    local h              = 0
 
-    -- Main row button
-    local btn = Instance.new("TextButton");
-    btn.Name                  = title .. "ColorPicker";
-    btn.BackgroundColor3      = fromRGB(50, 50, 50);
-    btn.BackgroundTransparency = 1;
-    btn.BorderSizePixel       = 0;
-    btn.Size                  = newUDim2(1, 0, 0, 30);
-    btn.Text                  = "";
-    btn.Parent                = self.bodyFrame;
+    local btn                          = Instance.new("TextButton")
+    btn.BackgroundColor3               = C.white
+    btn.BackgroundTransparency         = 1
+    btn.BorderSizePixel                = 0
+    btn.Size                           = ud2(1, 0, 0, 30)
+    btn.Text                           = ""
+    btn.Parent                         = self.bodyFrame
 
-    -- colorFrame: small square showing current color (left side)
-    local colorFrame = Instance.new("Frame");
-    colorFrame.Name            = "colorFrame";
-    colorFrame.BorderSizePixel = 0;
-    colorFrame.Size            = newUDim2(0, 10, 0, 10);
-    colorFrame.Position        = newUDim2(0, 8, 0.5, -5);
-    colorFrame.Parent          = btn;
+    local colorDot                     = Instance.new("Frame")
+    colorDot.BorderSizePixel           = 0
+    colorDot.Size                      = ud2off(14, 14)
+    colorDot.Position                  = ud2(0, 10, 0.5, -7)
+    colorDot.Parent                    = btn
 
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 24, 0, 0);
-    titleLabel.Size               = newUDim2(1, -34, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = btn;
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 30, 0, 0)
+    titleLbl.Size                      = ud2(1, -40, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = btn
 
-    -- colorPickingFrame: hidden until clicked, expands to 170×120
-    local colorPickingFrame = Instance.new("Frame");
-    colorPickingFrame.Name             = "colorPickingFrame";
-    colorPickingFrame.BackgroundColor3 = fromRGB(30, 30, 30);
-    colorPickingFrame.BorderSizePixel  = 0;
-    colorPickingFrame.Position         = newUDim2(0, 8, 1, 0);
-    colorPickingFrame.Size             = newUDim2(0, 170, 0, 0);
-    colorPickingFrame.ClipsDescendants = true;
-    colorPickingFrame.Visible          = false;
-    colorPickingFrame.ZIndex           = 5;
-    colorPickingFrame.Parent           = btn;
+    -- Picker panel
+    local panel                        = Instance.new("Frame")
+    panel.BackgroundColor3             = fromRGB(28, 28, 28)
+    panel.BorderSizePixel              = 0
+    panel.Position                     = ud2(0, 8, 1, 0)
+    panel.Size                         = ud2(0, 170, 0, 0)
+    panel.ClipsDescendants             = true
+    panel.Visible                      = false
+    panel.ZIndex                       = 5
+    panel.Parent                       = btn
 
-    -- hueSatFrame: hue/sat gradient picker
-    local hueSatFrame = Instance.new("ImageLabel");
-    hueSatFrame.Name             = "hueSatFrame";
-    hueSatFrame.BackgroundColor3 = fromRGB(255, 0, 0);
-    hueSatFrame.BorderSizePixel  = 0;
-    hueSatFrame.Position         = newUDim2(0, 4, 0, 4);
-    hueSatFrame.Size             = newUDim2(0, 130, 0, 90);
-    hueSatFrame.Image            = "rbxassetid://4155801252";
-    hueSatFrame.ZIndex           = 5;
-    hueSatFrame.Parent           = colorPickingFrame;
+    -- Hue-Sat gradient
+    local hueSat                       = Instance.new("ImageLabel")
+    hueSat.BackgroundColor3            = fromRGB(255, 0, 0)
+    hueSat.BorderSizePixel             = 0
+    hueSat.Position                    = ud2(0, 4, 0, 4)
+    hueSat.Size                        = ud2(0, 130, 0, 90)
+    hueSat.Image                       = "rbxassetid://4155801252"  -- white-to-transparent gradient (safe asset)
+    hueSat.ZIndex                      = 5
+    hueSat.Parent                      = panel
 
-    local hueSatIndicatorFrame = Instance.new("Frame");
-    hueSatIndicatorFrame.Name             = "hueSatIndicatorFrame";
-    hueSatIndicatorFrame.BackgroundColor3 = fromRGB(255, 255, 255);
-    hueSatIndicatorFrame.BorderSizePixel  = 1;
-    hueSatIndicatorFrame.Size             = newUDim2(0, 6, 0, 6);
-    hueSatIndicatorFrame.Position         = newUDim2(0, 0, 0, 0);
-    hueSatIndicatorFrame.ZIndex           = 6;
-    hueSatIndicatorFrame.Parent           = hueSatFrame;
+    local hueSatCursor                 = Instance.new("Frame")
+    hueSatCursor.BackgroundColor3      = C.white
+    hueSatCursor.BorderSizePixel       = 1
+    hueSatCursor.Size                  = ud2off(6, 6)
+    hueSatCursor.Position              = ud2(0, 0, 0, 0)
+    hueSatCursor.ZIndex                = 6
+    hueSatCursor.Parent                = hueSat
 
-    local valueFrame = Instance.new("ImageLabel");
-    valueFrame.Name             = "valueFrame";
-    valueFrame.BackgroundColor3 = fromRGB(255, 0, 0);
-    valueFrame.BorderSizePixel  = 0;
-    valueFrame.Position         = newUDim2(0, 138, 0, 4);
-    valueFrame.Size             = newUDim2(0, 16, 0, 90);
-    valueFrame.Image            = "rbxassetid://4155801252";
-    valueFrame.ZIndex           = 5;
-    valueFrame.Parent           = colorPickingFrame;
+    -- Value (brightness) strip
+    local valStrip                     = Instance.new("ImageLabel")
+    valStrip.BackgroundColor3          = fromRGB(255, 0, 0)
+    valStrip.BorderSizePixel           = 0
+    valStrip.Position                  = ud2(0, 138, 0, 4)
+    valStrip.Size                      = ud2(0, 16, 0, 90)
+    valStrip.Image                     = "rbxassetid://4155801252"
+    valStrip.ZIndex                    = 5
+    valStrip.Parent                    = panel
 
-    local valueIndicatorFrame = Instance.new("Frame");
-    valueIndicatorFrame.Name             = "valueIndicatorFrame";
-    valueIndicatorFrame.BackgroundColor3 = fromRGB(255, 255, 255);
-    valueIndicatorFrame.BorderSizePixel  = 1;
-    valueIndicatorFrame.Size             = newUDim2(1, 0, 0, 4);
-    valueIndicatorFrame.Position         = newUDim2(0, 0, 0, 0);
-    valueIndicatorFrame.ZIndex           = 6;
-    valueIndicatorFrame.Parent           = valueFrame;
+    local valCursor                    = Instance.new("Frame")
+    valCursor.BackgroundColor3         = C.white
+    valCursor.BorderSizePixel          = 1
+    valCursor.Size                     = ud2(1, 0, 0, 4)
+    valCursor.Position                 = ud2(0, 0, 0, 0)
+    valCursor.ZIndex                   = 6
+    valCursor.Parent                   = valStrip
 
-    local rainbowBtn = Instance.new("TextButton");
-    rainbowBtn.Name             = "rainbowBtn";
-    rainbowBtn.BackgroundColor3 = fromRGB(55, 55, 55);
-    rainbowBtn.BorderSizePixel  = 0;
-    rainbowBtn.Position         = newUDim2(0, 4, 0, 98);
-    rainbowBtn.Size             = newUDim2(0, 150, 0, 16);
-    rainbowBtn.Font             = Enum.Font.GothamBold;
-    rainbowBtn.TextSize         = 10;
-    rainbowBtn.TextColor3       = fromRGB(255, 255, 255);
-    rainbowBtn.Text             = "RAINBOW";
-    rainbowBtn.ZIndex           = 5;
-    rainbowBtn.Parent           = colorPickingFrame;
+    local rainbowBtn                   = Instance.new("TextButton")
+    rainbowBtn.BackgroundColor3        = fromRGB(55, 55, 55)
+    rainbowBtn.BorderSizePixel         = 0
+    rainbowBtn.Position                = ud2(0, 4, 0, 98)
+    rainbowBtn.Size                    = ud2(0, 150, 0, 16)
+    rainbowBtn.Font                    = Enum.Font.GothamBold
+    rainbowBtn.TextSize                = 10
+    rainbowBtn.TextColor3              = C.white
+    rainbowBtn.Text                    = "RAINBOW"
+    rainbowBtn.ZIndex                  = 5
+    rainbowBtn.Parent                  = panel
 
-    presetColor = presetColor or fromRGB(255, 255, 255);
+    -- Initialise color
+    presetColor = presetColor or fromRGB(255, 255, 255)
     if config[title] then
         if type(config[title]) == "table" and config[title]["R"] then
-            presetColor = fromRGB(config[title]["R"], config[title]["G"], config[title]["B"]);
-            popup:new("Set " .. title .. " to " .. floor(config[title]["R"]) .. " " .. floor(config[title]["G"]) .. " " .. floor(config[title]["B"]));
+            presetColor = fromRGB(config[title]["R"], config[title]["G"], config[title]["B"])
+            popup:new("Set " .. title .. " to "
+                .. floor(config[title]["R"]) .. " "
+                .. floor(config[title]["G"]) .. " "
+                .. floor(config[title]["B"]))
         elseif config[title] == "Rainbow" then
-            rainbow = true;
-            popup:new("Set " .. title .. " to rainbow");
-        end;
-    end;
+            rainbow = true
+            popup:new("Set " .. title .. " to rainbow")
+        end
+    end
+    callback(presetColor)
+    colorDot.BackgroundColor3 = presetColor
 
-    callback(presetColor);
-    colorFrame.BackgroundColor3 = presetColor;
-
-    self:initBtnEffect(btn);
+    self:initBtnEffect(btn)
 
     btn.MouseButton1Click:Connect(function()
-        if not colorPickingFrame.Visible then
-            oldSize = self.bodyFrame.CanvasSize;
-            self.bodyFrame.CanvasSize = oldSize + newUDim2(0, 0, 0, 170);
-            colorPickingFrame.Visible = true;
-            colorPickingFrame:TweenSize(newUDim2(0, 170, 0, 120), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-        elseif colorPickingFrame.Visible then
-            colorPickingFrame:TweenSize(newUDim2(0, 170, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-            wait(0.15);
-            colorPickingFrame.Visible = false;
-            self.bodyFrame.CanvasSize = oldSize;
-        end;
-    end);
-
-    btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire(); end);
+        if not panel.Visible then
+            oldSize = self.bodyFrame.CanvasSize
+            self.bodyFrame.CanvasSize = oldSize + ud2(0, 0, 0, 130)
+            panel.Visible = true
+            panel:TweenSize(ud2(0, 170, 0, 120), "Out", "Quad", 0.2, true)
+        else
+            panel:TweenSize(ud2(0, 170, 0, 0), "Out", "Quad", 0.2, true)
+            wait(0.15)
+            panel.Visible = false
+            self.bodyFrame.CanvasSize = oldSize
+        end
+    end)
+    btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire() end)
 
     rainbowBtn.MouseButton1Click:Connect(function()
-        config[title] = "Rainbow"; saveConfig();
-        rainbow = true;
-        popup:new("Set " .. title .. " to rainbow");
-    end);
+        config[title] = "Rainbow"; saveConfig()
+        rainbow = true
+        popup:new("Set " .. title .. " to rainbow")
+    end)
 
-    hueSatFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then hueSatDragging = true; end;
-    end);
-    hueSatFrame.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            hueSatDragging = false;
-            config[title] = {R = colorFrame.BackgroundColor3.R * 255, G = colorFrame.BackgroundColor3.G * 255, B = colorFrame.BackgroundColor3.B * 255};
-            saveConfig();
-            popup:new("Set " .. title .. " to " .. floor(colorFrame.BackgroundColor3.R * 255) .. " " .. floor(colorFrame.BackgroundColor3.G * 255) .. " " .. floor(colorFrame.BackgroundColor3.B * 255));
-        end;
-    end);
-    valueFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then valueDragging = true; end;
-    end);
-    valueFrame.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            valueDragging = false;
-            config[title] = {R = colorFrame.BackgroundColor3.R * 255, G = colorFrame.BackgroundColor3.G * 255, B = colorFrame.BackgroundColor3.B * 255};
-            saveConfig();
-            popup:new("Set " .. title .. " to " .. floor(colorFrame.BackgroundColor3.R * 255) .. " " .. floor(colorFrame.BackgroundColor3.G * 255) .. " " .. floor(colorFrame.BackgroundColor3.B * 255));
-        end;
-    end);
+    local function saveColor()
+        config[title] = {
+            R = colorDot.BackgroundColor3.R * 255,
+            G = colorDot.BackgroundColor3.G * 255,
+            B = colorDot.BackgroundColor3.B * 255,
+        }
+        saveConfig()
+        popup:new("Set " .. title .. " to "
+            .. floor(colorDot.BackgroundColor3.R * 255) .. " "
+            .. floor(colorDot.BackgroundColor3.G * 255) .. " "
+            .. floor(colorDot.BackgroundColor3.B * 255))
+    end
 
-    -- Exact original InputChanged logic
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if hueSatDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            rainbow = false;
-            h = clamp((input.Position.X - hueSatFrame.AbsolutePosition.X) / hueSatFrame.AbsoluteSize.X, 0, 1);
-            hueSatIndicatorFrame.Position  = newUDim2(h, 0, clamp((input.Position.Y - hueSatFrame.AbsolutePosition.Y) / hueSatFrame.AbsoluteSize.Y, 0, 1), 0);
-            valueIndicatorFrame.BackgroundColor3 = fromHSV(h, 1 - (1 - hueSatIndicatorFrame.Position.Y.Scale), 1);
-            colorFrame.BackgroundColor3    = fromHSV(hueSatIndicatorFrame.Position.X.Scale, 1 - hueSatIndicatorFrame.Position.Y.Scale, 1 - valueIndicatorFrame.Position.Y.Scale);
-            valueFrame.ImageColor3         = fromHSV(hueSatIndicatorFrame.Position.X.Scale, 1 - hueSatIndicatorFrame.Position.Y.Scale, 1);
-            callback(colorFrame.BackgroundColor3);
-        elseif valueDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            rainbow = false;
-            valueIndicatorFrame.Position   = newUDim2(0, 0, clamp((input.Position.Y - valueFrame.AbsolutePosition.Y) / valueFrame.AbsoluteSize.Y, 0, 1), 0);
-            valueIndicatorFrame.BackgroundColor3 = fromHSV(h, 1 - (1 - hueSatIndicatorFrame.Position.Y.Scale), 1);
-            colorFrame.BackgroundColor3    = fromHSV(hueSatIndicatorFrame.Position.X.Scale, 1 - hueSatIndicatorFrame.Position.Y.Scale, 1 - valueIndicatorFrame.Position.Y.Scale);
-            valueFrame.ImageColor3         = fromHSV(hueSatIndicatorFrame.Position.X.Scale, 1 - hueSatIndicatorFrame.Position.Y.Scale, 1);
-            callback(colorFrame.BackgroundColor3);
-        end;
-    end);
+    hueSat.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then hueSatDrag = true end
+    end)
+    hueSat.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            hueSatDrag = false; saveColor()
+        end
+    end)
+    valStrip.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then valDrag = true end
+    end)
+    valStrip.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            valDrag = false; saveColor()
+        end
+    end)
 
-    -- Exact original rainbow loop
+    inputSvc.InputChanged:Connect(function(input)
+        local isMouse = input.UserInputType == Enum.UserInputType.MouseMovement
+                     or input.UserInputType == Enum.UserInputType.Touch
+        if not isMouse then return end
+
+        if hueSatDrag then
+            rainbow = false
+            h = clamp((input.Position.X - hueSat.AbsolutePosition.X) / hueSat.AbsoluteSize.X, 0, 1)
+            local s = clamp((input.Position.Y - hueSat.AbsolutePosition.Y) / hueSat.AbsoluteSize.Y, 0, 1)
+            hueSatCursor.Position      = ud2(h, 0, s, 0)
+            valCursor.BackgroundColor3 = fromHSV(h, 1 - (1 - s), 1)
+            colorDot.BackgroundColor3  = fromHSV(h, 1 - s, 1 - valCursor.Position.Y.Scale)
+            valStrip.ImageColor3       = fromHSV(h, 1 - s, 1)
+            callback(colorDot.BackgroundColor3)
+
+        elseif valDrag then
+            rainbow = false
+            local v = clamp((input.Position.Y - valStrip.AbsolutePosition.Y) / valStrip.AbsoluteSize.Y, 0, 1)
+            valCursor.Position         = ud2(0, 0, v, 0)
+            colorDot.BackgroundColor3  = fromHSV(
+                hueSatCursor.Position.X.Scale,
+                1 - hueSatCursor.Position.Y.Scale,
+                1 - v)
+            callback(colorDot.BackgroundColor3)
+        end
+    end)
+
+    -- Rainbow loop
     spawn(function()
         while true do
             for i = 1, 230 do
-                rainbowBtn.TextColor3 = fromHSV(i / 230, 1, 1);
+                rainbowBtn.TextColor3 = fromHSV(i / 230, 1, 1)
                 if rainbow then
-                    colorFrame.BackgroundColor3 = fromHSV(i / 230, 1, 1);
-                    callback(fromHSV(i / 230, 1, 1));
-                end;
-                wait();
-            end;
-            wait();
-        end;
-    end);
-end;
+                    colorDot.BackgroundColor3 = fromHSV(i / 230, 1, 1)
+                    callback(fromHSV(i / 230, 1, 1))
+                end
+                wait()
+            end
+            wait()
+        end
+    end)
+end
 
--- ── newDropdown ───────────────────────────────────────────────────────────────
--- Original (rbxassetid://4531687341):
---   30px row, .titleLabel left, .arrowLabel right (rotates 0↔180)
---   .bodyFrame expands below: 170 wide, (#children-1)*27 tall
---   each option from rbxassetid://4531683854: 27px TextButton inside bodyFrame
+-- ─────────────────────────────────────────────────────────────────────────────
+-- newDropdown
+-- ─────────────────────────────────────────────────────────────────────────────
 function AxewareLib.Content:newDropdown(title, callback, list, noCallbackOnStart)
-    self:Resize(self.bodyFrame);
+    self:Resize(self.bodyFrame)
 
-    local oldSize;
+    local oldSize
 
-    local btn = Instance.new("TextButton");
-    btn.Name                  = title .. "Dropdown";
-    btn.BackgroundColor3      = fromRGB(50, 50, 50);
-    btn.BackgroundTransparency = 1;
-    btn.BorderSizePixel       = 0;
-    btn.Size                  = newUDim2(1, 0, 0, 30);
-    btn.Text                  = "";
-    btn.Parent                = self.bodyFrame;
+    local btn                          = Instance.new("TextButton")
+    btn.BackgroundColor3               = C.white
+    btn.BackgroundTransparency         = 1
+    btn.BorderSizePixel                = 0
+    btn.Size                           = ud2(1, 0, 0, 30)
+    btn.Text                           = ""
+    btn.Parent                         = self.bodyFrame
 
-    local titleLabel = Instance.new("TextLabel");
-    titleLabel.Name               = "titleLabel";
-    titleLabel.BackgroundTransparency = 1;
-    titleLabel.Position           = newUDim2(0, 8, 0, 0);
-    titleLabel.Size               = newUDim2(1, -30, 1, 0);
-    titleLabel.Font               = Enum.Font.Gotham;
-    titleLabel.TextSize           = 13;
-    titleLabel.TextColor3         = fromRGB(255, 255, 255);
-    titleLabel.TextXAlignment     = Enum.TextXAlignment.Left;
-    titleLabel.Text               = title;
-    titleLabel.Parent             = btn;
+    local titleLbl                     = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency    = 1
+    titleLbl.Position                  = ud2(0, 10, 0, 0)
+    titleLbl.Size                      = ud2(1, -30, 1, 0)
+    titleLbl.Font                      = Enum.Font.Gotham
+    titleLbl.TextSize                  = 13
+    titleLbl.TextColor3                = C.textMain
+    titleLbl.TextXAlignment            = Enum.TextXAlignment.Left
+    titleLbl.Text                      = title
+    titleLbl.Parent                    = btn
 
-    -- arrowLabel: "v" rotates to 180° when open
-    local arrowLabel = Instance.new("TextLabel");
-    arrowLabel.Name               = "arrowLabel";
-    arrowLabel.BackgroundTransparency = 1;
-    arrowLabel.Position           = newUDim2(1, -18, 0, 0);
-    arrowLabel.Size               = newUDim2(0, 14, 1, 0);
-    arrowLabel.Font               = Enum.Font.GothamBold;
-    arrowLabel.TextSize           = 10;
-    arrowLabel.TextColor3         = fromRGB(180, 180, 180);
-    arrowLabel.Text               = "v";
-    arrowLabel.Rotation           = 180;
-    arrowLabel.Parent             = btn;
+    local arrow                        = Instance.new("TextLabel")
+    arrow.BackgroundTransparency       = 1
+    arrow.Position                     = ud2(1, -20, 0, 0)
+    arrow.Size                         = ud2(0, 16, 1, 0)
+    arrow.Font                         = Enum.Font.GothamBold
+    arrow.TextSize                     = 10
+    arrow.TextColor3                   = C.textGrey
+    arrow.Text                         = "v"
+    arrow.Rotation                     = 180
+    arrow.Parent                       = btn
 
-    -- bodyFrame: dropdown panel, 170 wide, expands below btn
-    local bodyFrame = Instance.new("Frame");
-    bodyFrame.Name             = "bodyFrame";
-    bodyFrame.BackgroundColor3 = fromRGB(35, 35, 35);
-    bodyFrame.BorderSizePixel  = 0;
-    bodyFrame.Position         = newUDim2(0, 0, 1, 0);
-    bodyFrame.Size             = newUDim2(0, 170, 0, 0);
-    bodyFrame.ClipsDescendants = true;
-    bodyFrame.ZIndex           = 5;
-    bodyFrame.Visible          = false;
-    bodyFrame.Parent           = btn;
+    -- Dropdown panel
+    local panel                        = Instance.new("Frame")
+    panel.BackgroundColor3             = C.dropdown
+    panel.BorderSizePixel              = 0
+    panel.Position                     = ud2(0, 0, 1, 0)
+    panel.Size                         = ud2(1, 0, 0, 0)
+    panel.ClipsDescendants             = true
+    panel.ZIndex                       = 5
+    panel.Visible                      = false
+    panel.Parent                       = btn
 
-    local ddLayout = Instance.new("UIListLayout");
-    ddLayout.SortOrder = Enum.SortOrder.LayoutOrder;
-    ddLayout.Parent    = bodyFrame;
+    local panelLayout                  = Instance.new("UIListLayout")
+    panelLayout.SortOrder              = Enum.SortOrder.LayoutOrder
+    panelLayout.Parent                 = panel
+
+    local arrowOpen  = tweenSvc:Create(arrow, TweenInfo.new(0.2), { Rotation = 0   })
+    local arrowClose = tweenSvc:Create(arrow, TweenInfo.new(0.2), { Rotation = 180 })
 
     if not noCallbackOnStart then
-        callback(config[title] and config[title] or list[1]);
-        if config[title] then
-            popup:new("Set " .. title .. " to " .. config[title]);
-        end;
-    end;
+        callback(config[title] or list[1])
+        if config[title] then popup:new("Set " .. title .. " to " .. config[title]) end
+    end
 
-    self:initBtnEffect(btn);
-
-    local arrowTween  = tweenService:Create(arrowLabel, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = 0});
-    local arrowTween1 = tweenService:Create(arrowLabel, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = 180});
+    self:initBtnEffect(btn)
 
     local function refresh(lst)
-        for _, v in next, bodyFrame:GetChildren() do
-            if not v:IsA("UIListLayout") then v:Destroy(); end;
-        end;
+        for _, v in next, panel:GetChildren() do
+            if not v:IsA("UIListLayout") then v:Destroy() end
+        end
         for _, v in next, lst do
-            local opt = Instance.new("TextButton");
-            opt.BackgroundColor3      = fromRGB(45, 45, 45);
-            opt.BackgroundTransparency = 1;
-            opt.BorderSizePixel       = 0;
-            opt.Size                  = newUDim2(1, 0, 0, 27);
-            opt.Font                  = Enum.Font.Gotham;
-            opt.TextSize              = 12;
-            opt.TextColor3            = fromRGB(220, 220, 220);
-            opt.Text                  = v;
-            opt.ZIndex                = 6;
-            opt.Parent                = bodyFrame;
+            local opt                          = Instance.new("TextButton")
+            opt.BackgroundColor3               = C.dropOpt
+            opt.BackgroundTransparency         = 1
+            opt.BorderSizePixel                = 0
+            opt.Size                           = ud2(1, 0, 0, 27)
+            opt.Font                           = Enum.Font.Gotham
+            opt.TextSize                       = 12
+            opt.TextColor3                     = C.textMain
+            opt.Text                           = v
+            opt.ZIndex                         = 6
+            opt.Parent                         = panel
 
-            local hIn  = tweenService:Create(opt, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0.5});
-            local hOut = tweenService:Create(opt, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 1});
-            opt.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement then hIn:Play(); end;
-            end);
-            opt.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement then hOut:Play(); end;
-            end);
+            local hIn  = tweenSvc:Create(opt, TweenInfo.new(0.15), { BackgroundTransparency = 0.5 })
+            local hOut = tweenSvc:Create(opt, TweenInfo.new(0.15), { BackgroundTransparency = 1   })
+            opt.InputBegan:Connect(function(i)
+                if i.UserInputType == Enum.UserInputType.MouseMovement then hIn:Play() end
+            end)
+            opt.InputEnded:Connect(function(i)
+                if i.UserInputType == Enum.UserInputType.MouseMovement then hOut:Play() end
+            end)
 
-            local closeTween = tweenService:Create(arrowLabel, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = 180});
             opt.MouseButton1Click:Connect(function()
-                config[title] = v; saveConfig();
-                callback(v);
-                popup:new("Set " .. title .. " to " .. v);
-                closeTween:Play();
-                bodyFrame:TweenSize(newUDim2(0, 170, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-                wait(0.15);
-                bodyFrame.Visible = false;
-                self.bodyFrame.CanvasSize = oldSize;
-            end);
-            opt.TouchTap:Connect(function() opt.MouseButton1Click:Fire(); end);
-        end;
-    end;
+                config[title] = v; saveConfig()
+                callback(v)
+                popup:new("Set " .. title .. " to " .. v)
+                arrowClose:Play()
+                panel:TweenSize(ud2(1, 0, 0, 0), "Out", "Quad", 0.2, true)
+                wait(0.15)
+                panel.Visible = false
+                self.bodyFrame.CanvasSize = oldSize
+            end)
+            opt.TouchTap:Connect(function() opt.MouseButton1Click:Fire() end)
+        end
+    end
 
-    refresh(list);
+    refresh(list)
 
     btn.MouseButton1Click:Connect(function()
-        if not bodyFrame.Visible then
-            oldSize = self.bodyFrame.CanvasSize;
-            self.bodyFrame.CanvasSize = oldSize + newUDim2(0, 0, 0, 170);
-            bodyFrame.Visible = true;
-            arrowTween:Play();
-            bodyFrame:TweenSize(newUDim2(0, 170, 0, (#bodyFrame:GetChildren() - 1) * 27), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-        elseif bodyFrame.Visible then
-            arrowTween1:Play();
-            bodyFrame:TweenSize(newUDim2(0, 170, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true);
-            wait(0.15);
-            bodyFrame.Visible = false;
-            self.bodyFrame.CanvasSize = oldSize;
-        end;
-    end);
-
-    btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire(); end);
+        if not panel.Visible then
+            oldSize = self.bodyFrame.CanvasSize
+            local optCount = #panel:GetChildren() - 1  -- subtract UIListLayout
+            self.bodyFrame.CanvasSize = oldSize + ud2(0, 0, 0, optCount * 27 + 4)
+            panel.Visible = true
+            arrowOpen:Play()
+            panel:TweenSize(ud2(1, 0, 0, optCount * 27), "Out", "Quad", 0.2, true)
+        else
+            arrowClose:Play()
+            panel:TweenSize(ud2(1, 0, 0, 0), "Out", "Quad", 0.2, true)
+            wait(0.15)
+            panel.Visible = false
+            self.bodyFrame.CanvasSize = oldSize
+        end
+    end)
+    btn.TouchTap:Connect(function() btn.MouseButton1Click:Fire() end)
 
     return {
         Refresh = function(_, newList)
-            list = newList;
-            refresh(newList);
-        end;
-    };
-end;
+            list = newList
+            refresh(newList)
+        end
+    }
+end
 
-return AxewareLib;
+return AxewareLib
 
 
 --[[
-═══════════════════════════════════════════════════════
-  EXAMPLE USAGE — remove --[[ and ]] to enable
-═══════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════════
+  EXAMPLE USAGE
+═══════════════════════════════════════════════════════════════════
 
-local AxewareLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/yourrepo/main/AxewareLib.lua"))()
+local AxewareLib = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/yourrepo/main/AxewareLib.lua"
+))()
 
-local mainTab    = AxewareLib:new("Main")
-local visualsTab = AxewareLib:new("Visuals")
+local main    = AxewareLib:new("Main")
+local visuals = AxewareLib:new("Visuals")
 
--- Toggle button (red square = off, green square = on, saves state)
-mainTab:newBtn("Aimbot", function(enabled)
-    print("Aimbot:", enabled)
+-- Toggle (red = off, green = on, persists across sessions)
+main:newBtn("Aimbot", function(on)
+    print("Aimbot:", on)
 end)
 
-mainTab:newBtn("Silent Aim", function(enabled)
-    print("Silent Aim:", enabled)
-end)
-
--- Action button (no toggle, fires once)
-mainTab:newBtn("Kill All", function()
-    print("Kill All fired!")
+-- Action (fires once, no toggle state)
+main:newBtn("Kill All", function()
+    print("Kill All!")
 end, true)
 
--- Slider  (title, callback, min, max, startValue)
-mainTab:newSlider("X Offset", function(value)
-    print("X Offset:", value)
-end, 0, 100, 0)
+-- Slider  (title, callback, min, max, default)
+main:newSlider("FOV", function(v)
+    print("FOV:", v)
+end, 10, 200, 90)
 
-mainTab:newSlider("Smoothness", function(value)
-    print("Smoothness:", value)
-end, 1, 20, 4)
-
--- Textbox  (title, callback, presetText, noCallbackOnStart)
-mainTab:newTextbox("Target", function(text)
+-- Textbox  (title, callback, placeholder, noCallbackOnStart)
+main:newTextbox("Target Name", function(text)
     print("Target:", text)
-end, "", true)
+end, "Player1", true)
 
 -- Dropdown  (title, callback, list, noCallbackOnStart)
-local dd = mainTab:newDropdown("Aim Part", function(choice)
-    print("Aim Part:", choice)
-end, {"Head", "HumanoidRootPart", "Torso"})
+local dd = main:newDropdown("Aim Part", function(v)
+    print("Aim part:", v)
+end, {"Head", "Torso", "HumanoidRootPart"})
 
--- Refresh list later: dd:Refresh({"Head", "Torso"})
+-- dd:Refresh({"Head", "Torso"})   -- update list any time
 
--- Keybind (toggles on/off each press)
-mainTab:newBind("Aimbot Key", function(enabled)
-    print("Aimbot active:", enabled)
+-- Toggle keybind (toggles enabled each press)
+main:newBind("Aimbot Key", function(on)
+    print("Aimbot active:", on)
 end, Enum.KeyCode.E)
 
--- Hold bind (true while held, false on release)
-mainTab:newCBind("Trigger Hold", function(held)
+-- Hold keybind (true while held, false on release)
+main:newCBind("Trigger Key", function(held)
     print("Trigger held:", held)
 end)
 
 -- Color picker
-visualsTab:newColorPicker("ESP Color", function(color)
+visuals:newColorPicker("ESP Color", function(color)
     print("Color:", color)
 end, Color3.fromRGB(255, 0, 0))
 
-visualsTab:newBtn("Chams", function(enabled)
-    print("Chams:", enabled)
+visuals:newBtn("Chams", function(on)
+    print("Chams:", on)
 end)
 
-visualsTab:newSlider("ESP Range", function(value)
-    print("Range:", value)
+visuals:newSlider("ESP Range", function(v)
+    print("Range:", v)
 end, 50, 1000, 500)
 
 ]]
